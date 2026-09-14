@@ -21,7 +21,38 @@ Office League  —  3 players, $300,606.43 on the board
 3  Alice    $99,995.00  $66,565.50  +$202.50     -$5.00  -0.01%          1
 ```
 
+## Two ways to run it
+
+**On your phone** — a web app you open from the Claude artifact gallery. Same
+mechanics, built for a thumb: a fixed tab bar, 44px targets, decimal keypads on
+every number field, and no zoom-on-focus. The league lives in the artifact's
+database, so everyone you share the link with sees the same standings update as
+trades land. Source: [`web/index.html`](web/index.html).
+
+**On a computer** — the `fsx` command line below, for backfilling a season,
+scripting, or exporting. It is the only one of the two that can fetch live
+prices itself.
+
+The two keep separate books: the CLI owns its JSON file, the web app owns its
+database. Run a league in one or the other, not both at once.
+
+### Prices in the web app
+
+A published artifact cannot reach the internet — the sandbox blocks every
+outbound request — so the page reads prices from its database rather than
+fetching them. Keep them current either way:
+
+- **Ask Claude to refresh them.** It fetches live quotes and writes them back
+  into the artifact's database; the open page updates itself. A scheduled task
+  can do it every morning.
+- **Type one in.** The Market tab takes a symbol and a price. Useful mid-game
+  when someone wants a fill at the number on their own stocks app.
+
+Every valuation says how old its prices are, and a stale market chip appears in
+the header after six hours, so nobody scores off yesterday's close by accident.
+
 ## Install
+
 
 ```bash
 pip install -e .          # then use `fsx`
@@ -156,6 +187,12 @@ python -m unittest discover -s tests -t .
 69 tests covering the ledger mechanics, every house rule, quote parsing against
 a canned API payload (no network), the offline fallback, and end-to-end CLI
 runs. `--price` makes the whole tool usable — and testable — without a network.
+
+The web app carries its own copy of the engine in JavaScript, using BigInt at a
+fixed scale where Python uses `Decimal`. It is checked against the same
+scenarios as the Python suite — cost basis, zero-crossing sales, the
+reconciliation identity, every house rule — so the two front-ends cannot drift
+apart on a number.
 
 ## Command reference
 

@@ -1,0 +1,1144 @@
+<title>Fantasy Stock Exchange</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root {
+    --paper:#EBEEF3; --board:#FFFFFF; --sunk:#F4F6F9;
+    --ink:#10161F; --muted:#5D6975; --faint:#8A95A2;
+    --line:#D7DDE5; --line-soft:#E6EAF0;
+    --brass:#9A6B12; --brass-bg:#F6EBD5;
+    --up:#0A7442; --down:#BE2D40;
+    --up-bg:#E1F2E8; --down-bg:#FBE6E8;
+    --shadow:0 1px 2px rgba(16,22,31,.06), 0 4px 14px rgba(16,22,31,.05);
+    --ui:'Archivo', -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+    --mono:'IBM Plex Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+    --tab-h:58px;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --paper:#0C1117; --board:#151C25; --sunk:#111821;
+      --ink:#E6EBF2; --muted:#94A1B0; --faint:#6E7C8C;
+      --line:#242E3A; --line-soft:#1D2630;
+      --brass:#D9A441; --brass-bg:#2D2312;
+      --up:#3FCE8B; --down:#FF7183;
+      --up-bg:#10281D; --down-bg:#2B1519;
+      --shadow:0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.28);
+    }
+  }
+  :root[data-theme="dark"] {
+    --paper:#0C1117; --board:#151C25; --sunk:#111821;
+    --ink:#E6EBF2; --muted:#94A1B0; --faint:#6E7C8C;
+    --line:#242E3A; --line-soft:#1D2630;
+    --brass:#D9A441; --brass-bg:#2D2312;
+    --up:#3FCE8B; --down:#FF7183;
+    --up-bg:#10281D; --down-bg:#2B1519;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 4px 14px rgba(0,0,0,.28);
+  }
+
+  * { box-sizing:border-box; }
+  html { -webkit-text-size-adjust:100%; }
+  body {
+    margin:0; background:var(--paper); color:var(--ink);
+    font-family:var(--ui); font-size:15px; line-height:1.45;
+    -webkit-font-smoothing:antialiased;
+    -webkit-tap-highlight-color:transparent;
+  }
+  .num { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .up { color:var(--up); } .down { color:var(--down); }
+
+  /* ---- shell ---- */
+  header.top {
+    position:sticky; top:0; z-index:20; background:var(--board);
+    border-bottom:1px solid var(--line);
+  }
+  .top-in { max-width:640px; margin:0 auto; padding:10px 16px;
+            display:flex; align-items:center; gap:12px; }
+  .brandmark {
+    width:30px; height:30px; flex:none; border-radius:7px; background:var(--brass-bg);
+    color:var(--brass); display:grid; place-items:center;
+    font-family:var(--mono); font-weight:600; font-size:13px; letter-spacing:-.04em;
+  }
+  .brand-text { min-width:0; flex:1; }
+  .brand-text h1 { margin:0; font-size:15px; font-weight:600; letter-spacing:-.01em;
+                   white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .brand-text p { margin:0; font-size:11px; color:var(--faint); letter-spacing:.04em;
+                  text-transform:uppercase; white-space:nowrap; overflow:hidden;
+                  text-overflow:ellipsis; }
+
+  main { max-width:640px; margin:0 auto; padding:16px;
+         padding-bottom:calc(var(--tab-h) + 24px + env(safe-area-inset-bottom, 0px)); }
+  section[hidden] { display:none !important; }
+
+  /* ---- tab bar ---- */
+  nav.tabs {
+    position:fixed; left:0; right:0; bottom:0; z-index:30;
+    background:var(--board); border-top:1px solid var(--line);
+    padding-bottom:env(safe-area-inset-bottom, 0px);
+  }
+  .tabs-in { max-width:640px; margin:0 auto; display:grid; grid-template-columns:repeat(5,1fr); }
+  .tab {
+    appearance:none; border:0; background:none; cursor:pointer;
+    height:var(--tab-h); display:flex; flex-direction:column; align-items:center;
+    justify-content:center; gap:3px; color:var(--faint);
+    font-family:var(--ui); font-size:10px; font-weight:600;
+    letter-spacing:.06em; text-transform:uppercase; touch-action:manipulation;
+  }
+  .tab svg { width:20px; height:20px; stroke:currentColor; fill:none;
+             stroke-width:1.7; stroke-linecap:round; stroke-linejoin:round; }
+  .tab[aria-selected="true"] { color:var(--brass); }
+  .tab:active { background:var(--sunk); }
+  .tab:focus-visible { outline:2px solid var(--brass); outline-offset:-3px; }
+
+  /* ---- building blocks ---- */
+  .eyebrow { font-size:10.5px; font-weight:600; letter-spacing:.1em;
+             text-transform:uppercase; color:var(--faint); margin:0 0 8px; }
+  .panel { background:var(--board); border:1px solid var(--line);
+           border-radius:12px; box-shadow:var(--shadow); overflow:hidden; }
+  .panel + .panel, .stack > * + * { margin-top:14px; }
+  .stack { display:flex; flex-direction:column; gap:14px; }
+  .pad { padding:14px 16px; }
+  .divide > * + * { border-top:1px solid var(--line-soft); }
+
+  .chip { display:inline-flex; align-items:center; gap:5px; padding:2px 7px;
+          border-radius:999px; font-family:var(--mono); font-size:11.5px;
+          font-weight:500; white-space:nowrap; }
+  .chip.up { background:var(--up-bg); } .chip.down { background:var(--down-bg); }
+  .chip.flat { background:var(--sunk); color:var(--muted); }
+  .chip.warn { background:var(--brass-bg); color:var(--brass); }
+
+  /* ---- standings ---- */
+  .rank-row { display:grid; grid-template-columns:22px 1fr auto; gap:12px;
+              align-items:center; padding:12px 16px; }
+  .rank-row .rk { font-family:var(--mono); font-size:13px; color:var(--faint); }
+  .rank-row.leader { box-shadow:inset 3px 0 0 var(--brass); }
+  .rank-row.leader .rk { color:var(--brass); font-weight:600; }
+  .who { min-width:0; }
+  .who b { display:block; font-weight:600; font-size:15px; letter-spacing:-.01em;
+           white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .who span { display:block; font-size:11.5px; color:var(--faint);
+              font-family:var(--mono); white-space:nowrap; overflow:hidden;
+              text-overflow:ellipsis; }
+  .amt { text-align:right; }
+  .amt b { display:block; font-family:var(--mono); font-size:15px; font-weight:500;
+           letter-spacing:-.02em; }
+
+  /* ---- data rows ---- */
+  .row { display:flex; align-items:center; justify-content:space-between;
+         gap:12px; padding:11px 16px; }
+  .row .k { color:var(--muted); font-size:13.5px; }
+  .row .v { font-family:var(--mono); font-size:13.5px; }
+  .grid2 { display:grid; grid-template-columns:1fr 1fr; }
+  .cell { padding:12px 16px; }
+  .cell .lbl { font-size:10.5px; letter-spacing:.09em; text-transform:uppercase;
+               color:var(--faint); }
+  .cell .big { font-family:var(--mono); font-size:19px; font-weight:500;
+               letter-spacing:-.03em; margin-top:1px; }
+  .grid2 > .cell:nth-child(odd) { border-right:1px solid var(--line-soft); }
+  .grid2 > .cell:nth-child(n+3) { border-top:1px solid var(--line-soft); }
+
+  /* ---- position / price lines ---- */
+  .line { display:grid; grid-template-columns:1fr auto; gap:4px 12px; padding:12px 16px; }
+  .line .sym { font-family:var(--mono); font-weight:600; font-size:14px; letter-spacing:-.02em; }
+  .line .sub { font-size:11.5px; color:var(--faint); grid-column:1;
+               white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+  .line .val { font-family:var(--mono); font-size:14px; text-align:right; }
+  .line .val2 { font-size:11.5px; text-align:right; font-family:var(--mono); }
+
+  /* ---- forms ---- */
+  label.f { display:block; font-size:10.5px; font-weight:600; letter-spacing:.09em;
+            text-transform:uppercase; color:var(--faint); margin-bottom:5px; }
+  input, select, textarea {
+    width:100%; font-family:var(--ui); font-size:16px; /* 16px keeps iOS from zooming */
+    color:var(--ink); background:var(--sunk);
+    border:1px solid var(--line); border-radius:9px; padding:11px 12px; min-height:44px;
+  }
+  input.num-in { font-family:var(--mono); letter-spacing:-.01em; }
+  input:focus, select:focus, textarea:focus {
+    outline:none; border-color:var(--brass); background:var(--board);
+    box-shadow:0 0 0 3px color-mix(in srgb, var(--brass) 18%, transparent);
+  }
+  .field + .field { margin-top:12px; }
+  .two { display:grid; grid-template-columns:1fr 1fr; gap:12px; }
+  .hint { font-size:12px; color:var(--faint); margin:6px 0 0; }
+  .hint + .field { margin-top:12px; }
+
+  .seg { display:grid; grid-auto-flow:column; grid-auto-columns:1fr; gap:4px;
+         background:var(--sunk); border:1px solid var(--line);
+         border-radius:9px; padding:3px; }
+  .seg button {
+    appearance:none; border:0; background:none; border-radius:6px; min-height:38px;
+    font-family:var(--ui); font-size:13.5px; font-weight:600; color:var(--muted);
+    cursor:pointer; touch-action:manipulation;
+  }
+  .seg button[aria-pressed="true"] { background:var(--board); color:var(--ink);
+                                     box-shadow:0 1px 2px rgba(0,0,0,.12); }
+  .seg.side button[aria-pressed="true"][data-side="BUY"] { color:var(--up); }
+  .seg.side button[aria-pressed="true"][data-side="SELL"] { color:var(--down); }
+
+  button.btn {
+    appearance:none; width:100%; min-height:48px; border-radius:10px; cursor:pointer;
+    font-family:var(--ui); font-size:15px; font-weight:600; letter-spacing:.01em;
+    border:1px solid var(--line); background:var(--board); color:var(--ink);
+    touch-action:manipulation;
+  }
+  button.btn.primary { background:var(--ink); color:var(--board); border-color:var(--ink); }
+  button.btn.brass { background:var(--brass); color:#fff; border-color:var(--brass); }
+  button.btn.danger { color:var(--down); border-color:var(--down); background:transparent; }
+  button.btn:active { transform:translateY(1px); }
+  button.btn:disabled { opacity:.45; cursor:default; transform:none; }
+  button.mini {
+    appearance:none; border:1px solid var(--line); background:var(--board); color:var(--muted);
+    border-radius:7px; min-height:34px; padding:0 11px; font-family:var(--ui);
+    font-size:12.5px; font-weight:600; cursor:pointer; touch-action:manipulation;
+  }
+  button.mini:active { background:var(--sunk); }
+  :focus-visible { outline:2px solid var(--brass); outline-offset:2px; }
+
+  .ticket-total { background:var(--sunk); border-top:1px solid var(--line-soft); }
+  .msg { border-radius:9px; padding:10px 12px; font-size:13.5px; margin-top:12px; }
+  .msg.bad { background:var(--down-bg); color:var(--down); }
+  .msg.good { background:var(--up-bg); color:var(--up); }
+  .banner { display:flex; gap:12px; align-items:center; justify-content:space-between;
+            background:var(--brass-bg); color:var(--brass); border-radius:10px;
+            padding:10px 12px; font-size:12.5px; margin-bottom:14px; }
+  .banner button { flex:none; }
+  .empty { text-align:center; color:var(--faint); padding:34px 20px; font-size:13.5px; }
+  .tape { display:grid; grid-template-columns:1fr auto; gap:2px 12px;
+          padding:11px 16px; align-items:baseline; }
+  .tape .what { font-size:13.5px; }
+  .tape .what .t { font-family:var(--mono); font-weight:600; letter-spacing:-.02em; }
+  .tape .cash { font-family:var(--mono); font-size:13.5px; text-align:right; white-space:nowrap; }
+  .tape .meta { grid-column:1/-1; font-family:var(--mono); font-size:11px; color:var(--faint);
+                overflow:hidden; text-overflow:ellipsis; }
+  .tape.undoable .meta { grid-column:1; }
+  .tape .undo { grid-column:2; justify-self:end; }
+  .sr { position:absolute; width:1px; height:1px; overflow:hidden; clip:rect(0 0 0 0); }
+  @media (prefers-reduced-motion: reduce) { * { transition:none !important; } }
+</style>
+
+<header class="top">
+  <div class="top-in">
+    <div class="brandmark" aria-hidden="true">FX</div>
+    <div class="brand-text">
+      <h1 id="league-name">Fantasy Stock Exchange</h1>
+      <p id="league-sub">Loading…</p>
+    </div>
+    <span id="market-chip" class="chip flat">—</span>
+  </div>
+</header>
+
+<main>
+  <section id="tab-board"></section>
+  <section id="tab-trade" hidden></section>
+  <section id="tab-book" hidden></section>
+  <section id="tab-market" hidden></section>
+  <section id="tab-league" hidden></section>
+</main>
+
+<nav class="tabs">
+  <div class="tabs-in" role="tablist" aria-label="Sections">
+    <button class="tab" role="tab" data-tab="board" aria-selected="true">
+      <svg viewBox="0 0 24 24"><path d="M4 19h16M7 19V9M12 19V5M17 19v-7"/></svg>Board</button>
+    <button class="tab" role="tab" data-tab="trade" aria-selected="false">
+      <svg viewBox="0 0 24 24"><path d="M4 8h12l-3-3M20 16H8l3 3"/></svg>Trade</button>
+    <button class="tab" role="tab" data-tab="book" aria-selected="false">
+      <svg viewBox="0 0 24 24"><path d="M5 4h10a3 3 0 013 3v13H8a3 3 0 01-3-3zM8 8h7M8 12h7"/></svg>Book</button>
+    <button class="tab" role="tab" data-tab="market" aria-selected="false">
+      <svg viewBox="0 0 24 24"><path d="M3 16l5-6 4 3 4-6 5 4"/><path d="M3 20h18"/></svg>Market</button>
+    <button class="tab" role="tab" data-tab="league" aria-selected="false">
+      <svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3"/><path d="M3.5 19a5.5 5.5 0 0111 0"/><path d="M16 6.5a3 3 0 010 5.6M17.5 19a5.5 5.5 0 00-2-4.2"/></svg>League</button>
+  </div>
+</nav>
+
+<script>
+"use strict";
+/* =========================================================================
+   Exact decimal arithmetic.
+   Every figure is a BigInt scaled by 1e8. Money is never a float: a season
+   of trading must not drift a cent, and 0.1 + 0.2 is a bug people notice
+   on a leaderboard.
+   ========================================================================= */
+const S = 100000000n, ZERO = 0n;
+const CENT = 1000000n;      // 1e8 / 100
+const PRICE_Q = 10000n;     // 4 decimal places
+
+class NumError extends Error {}
+
+function D(v) {
+  if (typeof v === "bigint") return v;
+  let s = String(v ?? "0").trim().replace(/[$,\s]/g, "");
+  if (s.endsWith("%")) s = s.slice(0, -1);
+  if (s === "" || s === "-" || s === "+") s = "0";
+  let neg = false;
+  if (s[0] === "-") { neg = true; s = s.slice(1); }
+  else if (s[0] === "+") s = s.slice(1);
+  if (!/^\d*(\.\d*)?$/.test(s)) throw new NumError(`“${v}” is not a number`);
+  const [i, f = ""] = s.split(".");
+  const out = BigInt(i || "0") * S + BigInt((f + "00000000").slice(0, 8));
+  return neg ? -out : out;
+}
+function rdiv(n, d) {                       // divide, rounding half away from zero
+  const neg = (n < ZERO) !== (d < ZERO);
+  const N = n < ZERO ? -n : n, Dd = d < ZERO ? -d : d;
+  let q = N / Dd;
+  if ((N % Dd) * 2n >= Dd) q += 1n;
+  return neg ? -q : q;
+}
+const mul = (a, b) => rdiv(a * b, S);
+const dvd = (a, b) => (b === ZERO ? ZERO : rdiv(a * S, b));
+const qCash = x => rdiv(x, CENT) * CENT;
+const qPrice = x => rdiv(x, PRICE_Q) * PRICE_Q;
+const absD = x => (x < ZERO ? -x : x);
+
+function plain(x, dp) {                     // BigInt -> decimal string
+  const neg = x < ZERO; const a = neg ? -x : x;
+  const whole = a / S;
+  let frac = String(a % S).padStart(8, "0");
+  if (dp !== undefined) frac = frac.slice(0, dp);
+  frac = frac.replace(/0+$/, "");
+  return (neg ? "-" : "") + whole + (frac ? "." + frac : "");
+}
+function group(n) { return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ","); }
+function fmtMoney(x, unit) {
+  unit = unit ?? state.unit;
+  const v = qCash(x), neg = v < ZERO, a = neg ? -v : v;
+  const cents = String((a % S) / CENT).padStart(2, "0");
+  return (neg ? "-" : "") + unit + group(a / S) + "." + cents;
+}
+function fmtSigned(x, unit) {
+  const v = qCash(x);
+  if (v === ZERO) return fmtMoney(ZERO, unit);
+  return (v > ZERO ? "+" : "") + fmtMoney(v, unit);
+}
+function fmtShares(x) { return plain(x, 8) || "0"; }
+function pctOf(part, whole) { return whole === ZERO ? ZERO : mul(dvd(part, whole), D(100)); }
+function fmtPct(x) {
+  const v = rdiv(x, CENT) * CENT;            // 2 dp
+  if (v === ZERO) return "0.00%";            // a loss too small to show is not a gain
+  const [i, f = ""] = plain(absD(v), 8).split(".");
+  const two = (f + "00").slice(0, 2);
+  return (v > ZERO ? "+" : "-") + i + "." + two + "%";
+}
+function dirClass(x) { return x > ZERO ? "up" : x < ZERO ? "down" : "flat"; }
+
+/* =========================================================================
+   League state and the ledger engine.
+   Positions, cash and P&L are always REPLAYED from the ledger, never stored
+   beside it — so the database cannot contradict itself and deleting an
+   entry is an exact reversal.
+   ========================================================================= */
+const state = {
+  config: null, players: [], ledger: [], prices: {}, snapshots: [],
+  unit: "$", ready: false, db: null, tab: "board",
+  bookPlayer: null, ticket: { side: "BUY", mode: "shares", player: null, symbol: "" },
+};
+const CURRENCY = { USD: "$", EUR: "€", GBP: "£", JPY: "¥", CAD: "C$", AUD: "A$" };
+
+function rules() {
+  const c = state.config || {};
+  return {
+    startingCash: D(c.startingCash ?? "100000"),
+    commissionFlat: D(c.commissionFlat ?? "0"),
+    commissionPct: D(c.commissionPct ?? "0"),
+    allowFractional: !!c.allowFractional,
+    allowShort: !!c.allowShort,
+    allowNegativeCash: !!c.allowNegativeCash,
+    maxPositionPct: c.maxPositionPct ? D(c.maxPositionPct) : null,
+  };
+}
+function commissionOn(notional) {
+  const r = rules();
+  return qCash(r.commissionFlat + mul(absD(notional), dvd(r.commissionPct, D(100))));
+}
+function cashDelta(e) {
+  const notional = qCash(mul(D(e.shares || "0"), D(e.price || "0")));
+  const fee = D(e.commission || "0");
+  if (e.kind === "BUY") return qCash(-notional - fee);
+  if (e.kind === "SELL") return qCash(notional - fee);
+  if (e.kind === "DEPOSIT") return qCash(D(e.amount || "0"));
+  if (e.kind === "WITHDRAW") return qCash(-D(e.amount || "0"));
+  return ZERO;
+}
+
+/** Apply a signed share change, splitting the trade at zero so a new
+ *  position never inherits the old one's cost basis. */
+function move(pf, pos, signed, price) {
+  while (signed !== ZERO) {
+    const crossing = pos.shares !== ZERO && (pos.shares > ZERO) !== (signed > ZERO);
+    if (!crossing) {
+      pos.shares += signed;
+      pos.cost = qCash(pos.cost + mul(signed, price));
+      return;
+    }
+    const closed = absD(signed) < absD(pos.shares) ? absD(signed) : absD(pos.shares);
+    const dir = pos.shares > ZERO ? 1n : -1n;
+    const avg = qPrice(dvd(pos.cost, pos.shares));
+    pf.realized = qCash(pf.realized + mul(closed, price - avg) * dir);
+    pos.shares -= dir * closed;
+    pos.cost = qCash(pos.cost - mul(dir * closed, avg));
+    if (pos.shares === ZERO) pos.cost = ZERO;
+    const left = absD(signed) - closed;
+    signed = left === ZERO ? ZERO : (signed > ZERO ? left : -left);
+  }
+}
+function applyEntry(pf, e) {
+  pf.cash = qCash(pf.cash + cashDelta(e));
+  if (e.kind === "DEPOSIT") { pf.deposits = qCash(pf.deposits + D(e.amount)); return; }
+  if (e.kind === "WITHDRAW") { pf.deposits = qCash(pf.deposits - D(e.amount)); return; }
+  pf.trades += 1;
+  const fee = D(e.commission || "0");
+  pf.fees = qCash(pf.fees + fee);
+  const sym = e.symbol;
+  const pos = pf.positions[sym] || (pf.positions[sym] = { symbol: sym, shares: ZERO, cost: ZERO });
+  const signed = e.kind === "BUY" ? D(e.shares) : -D(e.shares);
+  move(pf, pos, signed, D(e.price));
+  pf.realized = qCash(pf.realized - fee);    // fees ride on realised P&L, so the
+}                                            // equity identity always reconciles
+
+function replay(playerId, extraEntry) {
+  const p = state.players.find(x => x.id === playerId);
+  const pf = {
+    player: p, cash: D(p ? p.startingCash : "0"), positions: {},
+    realized: ZERO, fees: ZERO, deposits: ZERO, trades: 0,
+  };
+  for (const e of state.ledger) if (e.player === playerId) applyEntry(pf, e);
+  if (extraEntry) applyEntry(pf, extraEntry);
+  pf.base = qCash(D(p ? p.startingCash : "0") + pf.deposits);
+  pf.open = Object.values(pf.positions)
+    .filter(x => x.shares !== ZERO)
+    .sort((a, b) => a.symbol.localeCompare(b.symbol));
+  return pf;
+}
+function positionOf(pf, symbol) {
+  return pf.positions[symbol] || { symbol, shares: ZERO, cost: ZERO };
+}
+function priceOf(symbol) {
+  const p = state.prices[symbol];
+  return p ? D(p.price) : null;
+}
+function valuate(pf) {
+  const rows = pf.open.map(pos => {
+    const price = priceOf(pos.symbol);
+    const prev = state.prices[pos.symbol] && state.prices[pos.symbol].prevClose
+      ? D(state.prices[pos.symbol].prevClose) : null;
+    const value = price === null ? pos.cost : qCash(mul(pos.shares, price));
+    return {
+      pos, price, priced: price !== null, value,
+      unreal: qCash(value - pos.cost),
+      day: (price !== null && prev !== null) ? qCash(mul(pos.shares, price - prev)) : ZERO,
+      avg: qPrice(dvd(pos.cost, pos.shares)),
+    };
+  });
+  const marketValue = rows.reduce((a, r) => a + r.value, ZERO);
+  const equity = qCash(pf.cash + marketValue);
+  return {
+    pf, rows, marketValue, equity,
+    unreal: rows.reduce((a, r) => a + r.unreal, ZERO),
+    day: rows.reduce((a, r) => a + r.day, ZERO),
+    pnl: qCash(equity - pf.base),
+    ret: pctOf(qCash(equity - pf.base), pf.base),
+    unpriced: rows.filter(r => !r.priced).map(r => r.pos.symbol),
+  };
+}
+function standings() {
+  return state.players.map(p => valuate(replay(p.id)))
+    .sort((a, b) => (b.equity > a.equity ? 1 : b.equity < a.equity ? -1 : 0));
+}
+
+/** Validate a proposed trade. Returns an error string, or null when it may
+ *  be written. Nothing reaches the ledger until this passes. */
+function checkTrade(playerId, kind, symbol, shares, price, commission) {
+  const r = rules(), p = state.players.find(x => x.id === playerId);
+  if (!p) return "Pick a player first.";
+  if (!symbol) return "Enter a symbol.";
+  if (shares <= ZERO) return "Share quantity must be more than zero.";
+  if (price <= ZERO) return "Price must be more than zero.";
+  if (!r.allowFractional && shares % S !== ZERO)
+    return `Fractional shares are off for this league — ${fmtShares(shares)} ${symbol} is not a whole number.`;
+  const before = replay(playerId);
+  const entry = { kind, player: playerId, symbol, shares: plain(shares), price: plain(price),
+                  commission: plain(commission) };
+  const after = replay(playerId, entry);
+  if (after.cash < ZERO && !r.allowNegativeCash)
+    return `${p.name} is ${fmtMoney(-after.cash)} short — cash is ${fmtMoney(before.cash)} and this costs ${fmtMoney(-cashDelta(entry))}.`;
+  const pos = positionOf(after, symbol);
+  if (pos.shares < ZERO && !r.allowShort)
+    return `Short selling is off for this league — ${p.name} holds ${fmtShares(positionOf(before, symbol).shares)} ${symbol}.`;
+  if (r.maxPositionPct !== null && pos.shares !== ZERO) {
+    const v = valuate(after);
+    const held = absD(qCash(mul(pos.shares, price)));
+    const weight = pctOf(held, v.equity);
+    if (v.equity > ZERO && weight > r.maxPositionPct)
+      return `Position cap exceeded — ${symbol} would be ${fmtPct(weight).replace("+", "")} of ${p.name}'s book, over the ${plain(r.maxPositionPct, 2)}% limit.`;
+  }
+  return null;
+}
+
+/* =========================================================================
+   Database. Symbols are encoded for document ids because a ticker like
+   ^GSPC contains characters a path segment does not admit.
+   ========================================================================= */
+const encSym = s => s.replace(/[^A-Za-z0-9_\-.:@+]/g, c => "~" + c.charCodeAt(0).toString(16).toUpperCase());
+const slug = s => (s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "player");
+const nowISO = () => new Date().toISOString();
+
+async function connect() {
+  const db = await claude.use("db");
+  state.db = db;
+  if (!db) { state.ready = true; renderAll(); return; }
+  const live = (path, fn) => db.collection(path).onSnapshot(
+    snap => { fn(snap.docs.filter(d => d.exists).map(d => d.data())); renderAll(); },
+    err => { console.warn("db", path, err.code); }
+  );
+  db.doc("league/config").onSnapshot(snap => {
+    state.config = snap.exists ? snap.data() : null;
+    state.unit = CURRENCY[(state.config && state.config.currency) || "USD"] || "$";
+    state.ready = true;
+    renderAll();
+  }, err => { console.warn("db config", err.code); state.ready = true; renderAll(); });
+
+  live("players", rows => {
+    state.players = rows.sort((a, b) => String(a.joinedAt).localeCompare(String(b.joinedAt)));
+    if (!state.ticket.player && state.players[0]) state.ticket.player = state.players[0].id;
+    if (!state.bookPlayer && state.players[0]) state.bookPlayer = state.players[0].id;
+  });
+  live("ledger", rows => { state.ledger = rows.sort((a, b) => (a.seq || 0) - (b.seq || 0)); });
+  live("prices", rows => {
+    const map = {}; for (const r of rows) if (r && r.symbol) map[r.symbol] = r;
+    state.prices = map;
+  });
+  live("snapshots", rows => {
+    state.snapshots = rows.sort((a, b) => String(a.at).localeCompare(String(b.at)));
+  });
+}
+async function writeLedger(entry) {
+  const seq = Date.now();
+  const id = String(seq).padStart(15, "0") + "-" + Math.random().toString(36).slice(2, 7);
+  // One document per entry: an append never overwrites a concurrent trader's,
+  // which a single aggregated document would do under last-writer-wins.
+  await state.db.collection("ledger").doc(id).set({ ...entry, seq, id });
+}
+function dbFail(e) {
+  const code = e && e.code;
+  if (code === "not_granted" || code === "capability_disabled")
+    return "This view can't save changes — reopen the page from your artifact list.";
+  if (code === "quota_exceeded") return "This league's database is full. Delete old snapshots and try again.";
+  if (code === "resource_exhausted") return "Too many changes at once. Wait a moment and try again.";
+  if (code === "revoked") return "Your access to this league's data ended while the page was open.";
+  return (e && e.message) || "That didn't save. Try again.";
+}
+
+/* =========================================================================
+   Rendering
+   ========================================================================= */
+const $ = sel => document.querySelector(sel);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c =>
+  ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+function ago(iso) {
+  if (!iso) return "never";
+  const secs = (Date.now() - new Date(iso).getTime()) / 1000;
+  if (!isFinite(secs)) return "unknown";
+  if (secs < 90) return "just now";
+  if (secs < 5400) return Math.round(secs / 60) + " min ago";
+  if (secs < 129600) return Math.round(secs / 3600) + " h ago";
+  return Math.round(secs / 86400) + " d ago";
+}
+function shortWhen(iso) {
+  const d = new Date(iso);
+  if (isNaN(d)) return "";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short" }) + " " +
+         d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+}
+function priceAge() {
+  const all = Object.values(state.prices);
+  if (!all.length) return null;
+  return all.reduce((old, p) =>
+    (!old || String(p.asOf) < String(old)) ? p.asOf : old, all[0].asOf);
+}
+
+function renderHeader() {
+  const cfg = state.config;
+  $("#league-name").textContent = cfg ? cfg.name : "Fantasy Stock Exchange";
+  const chip = $("#market-chip");
+  if (!cfg) { $("#league-sub").textContent = "Not set up yet"; chip.textContent = "—"; chip.className = "chip flat"; return; }
+  const board = standings();
+  const pot = board.reduce((a, v) => a + v.equity, ZERO);
+  $("#league-sub").textContent = `${state.players.length} player${state.players.length === 1 ? "" : "s"} · ${fmtMoney(pot)}`;
+  const oldest = priceAge();
+  chip.textContent = oldest ? "Prices " + ago(oldest) : "No prices";
+  const stale = !oldest || (Date.now() - new Date(oldest).getTime()) > 6 * 3600e3;
+  chip.className = "chip " + (stale ? "warn" : "flat");
+}
+
+function setupCard() {
+  return `<div class="panel">
+    <div class="pad">
+      <p class="eyebrow">New league</p>
+      <h2 style="margin:0 0 4px;font-size:19px;letter-spacing:-.02em">Open the exchange</h2>
+      <p class="hint" style="margin-bottom:14px">Every player starts with the same stake and trades real tickers at real prices.</p>
+      <div class="field"><label class="f" for="s-name">League name</label>
+        <input id="s-name" value="Office League" autocomplete="off"></div>
+      <div class="two" style="margin-top:12px">
+        <div class="field" style="margin:0"><label class="f" for="s-cash">Starting stake</label>
+          <input id="s-cash" class="num-in" inputmode="decimal" value="100000"></div>
+        <div class="field" style="margin:0"><label class="f" for="s-fee">Fee per trade</label>
+          <input id="s-fee" class="num-in" inputmode="decimal" value="0"></div>
+      </div>
+      <div class="field"><label class="f">Rules</label>
+        <div class="seg"><button type="button" id="s-frac" aria-pressed="false">Fractional shares</button>
+        <button type="button" id="s-short" aria-pressed="false">Short selling</button></div>
+        <p class="hint">Tap to allow. Both stay off in most leagues.</p></div>
+      <button class="btn brass" id="s-go" style="margin-top:14px">Create league</button>
+      <div id="s-msg"></div>
+    </div></div>`;
+}
+
+function renderBoard() {
+  const el = $("#tab-board");
+  if (!state.config) { el.innerHTML = setupCard(); return; }
+  const board = standings();
+  let html = exampleBanner();
+  if (!board.length) {
+    html += `<div class="panel"><div class="empty">No players yet.<br>Add them in the League tab.</div></div>`;
+    el.innerHTML = html; return;
+  }
+  const leader = board[0];
+  const totalDay = board.reduce((a, v) => a + v.day, ZERO);
+  html += `<div class="panel">
+      <div class="grid2">
+        <div class="cell"><div class="lbl">Leader</div>
+          <div class="big" style="font-family:var(--ui);font-weight:600">${esc(leader.pf.player.name)}</div></div>
+        <div class="cell"><div class="lbl">Equity</div>
+          <div class="big">${fmtMoney(leader.equity)}</div></div>
+        <div class="cell"><div class="lbl">Ahead by</div>
+          <div class="big">${board[1] ? fmtMoney(leader.equity - board[1].equity) : "—"}</div></div>
+        <div class="cell"><div class="lbl">League today</div>
+          <div class="big ${dirClass(totalDay)}">${fmtSigned(totalDay)}</div></div>
+      </div></div>`;
+
+  html += `<p class="eyebrow" style="margin-top:18px">Standings</p><div class="panel divide">`;
+  board.forEach((v, i) => {
+    const holdings = v.rows.length
+      ? v.rows.map(r => `${r.pos.symbol} ${fmtShares(r.pos.shares)}`).join(" · ")
+      : "all cash";
+    html += `<div class="rank-row${i === 0 ? " leader" : ""}">
+      <div class="rk">${i + 1}</div>
+      <div class="who"><b>${esc(v.pf.player.name)}</b><span>${esc(holdings)}</span></div>
+      <div class="amt"><b>${fmtMoney(v.equity)}</b>
+        <span class="chip ${dirClass(v.pnl)}">${fmtPct(v.ret)}</span></div>
+    </div>`;
+  });
+  html += `</div>`;
+
+  const recent = state.ledger.slice(-6).reverse();
+  if (recent.length) {
+    html += `<p class="eyebrow" style="margin-top:18px">The tape</p><div class="panel divide">`;
+    html += recent.map(tapeRow).join("");
+    html += `</div>`;
+  }
+  el.innerHTML = html;
+}
+function exampleBanner() {
+  if (!state.config || !state.config.isExample) return "";
+  return `<div class="banner"><span><b>Example league.</b> Alice, Bob and Priya are made up — the prices are real.</span>
+    <button class="mini" data-act="reset-league">Start mine</button></div>`;
+}
+function tapeRow(e, undoable) {
+  const who = state.players.find(p => p.id === e.player);
+  const name = who ? who.name : e.player;
+  const delta = cashDelta(e);
+  const trade = e.kind === "BUY" || e.kind === "SELL";
+  const what = trade
+    ? `${esc(name)} ${e.kind === "BUY" ? "bought" : "sold"} <span class="t">${fmtShares(D(e.shares))} ${esc(e.symbol)}</span>`
+    : `${esc(name)} ${e.kind === "DEPOSIT" ? "added cash" : "took cash out"}`;
+  const meta = [shortWhen(e.at), trade ? "at " + fmtMoney(D(e.price)) : null, e.note]
+    .filter(Boolean).join(" · ");
+  return `<div class="tape${undoable ? " undoable" : ""}">
+    <div class="what">${what}</div>
+    <div class="cash ${dirClass(delta)}">${fmtSigned(delta)}</div>
+    <div class="meta">${esc(meta)}</div>
+    ${undoable ? `<div class="undo"><button class="mini" data-act="undo" data-id="${esc(e.id)}">Undo</button></div>` : ""}
+  </div>`;
+}
+
+function renderTrade() {
+  const el = $("#tab-trade");
+  if (!state.config) { el.innerHTML = `<div class="panel"><div class="empty">Create the league first.</div></div>`; return; }
+  if (!state.players.length) {
+    el.innerHTML = `<div class="panel"><div class="empty">Add a player before trading.</div></div>`; return;
+  }
+  const t = state.ticket;
+  if (!t.player || !state.players.some(p => p.id === t.player)) t.player = state.players[0].id;
+  const pf = replay(t.player);
+  const held = t.symbol ? positionOf(pf, t.symbol).shares : ZERO;
+  const known = Object.values(state.prices).sort((a, b) => a.symbol.localeCompare(b.symbol));
+  const quote = t.symbol ? state.prices[t.symbol] : null;
+
+  el.innerHTML = `
+  <div class="panel">
+    <div class="pad">
+      <div class="field"><label class="f" for="t-player">Player</label>
+        <select id="t-player">${state.players.map(p =>
+          `<option value="${esc(p.id)}"${p.id === t.player ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select>
+        <p class="hint">Cash ${fmtMoney(pf.cash)}${t.symbol ? ` · holds ${fmtShares(held)} ${esc(t.symbol)}` : ""}</p></div>
+
+      <div class="field"><label class="f">Side</label>
+        <div class="seg side">
+          <button type="button" data-side="BUY" aria-pressed="${t.side === "BUY"}">Buy</button>
+          <button type="button" data-side="SELL" aria-pressed="${t.side === "SELL"}">Sell</button>
+        </div></div>
+
+      <div class="field"><label class="f" for="t-symbol">Symbol</label>
+        <input id="t-symbol" class="num-in" list="known-symbols" autocapitalize="characters"
+               autocomplete="off" spellcheck="false" placeholder="AAPL" value="${esc(t.symbol)}">
+        <datalist id="known-symbols">${known.map(p =>
+          `<option value="${esc(p.symbol)}">${esc(p.name || "")}</option>`).join("")}</datalist>
+        ${quote ? `<p class="hint">${esc(quote.name || quote.symbol)} · ${fmtMoney(D(quote.price))} · ${esc(ago(quote.asOf))}</p>`
+          : t.symbol ? `<p class="hint" style="color:var(--brass)">No price stored for ${esc(t.symbol)} — set one in Market, or type a price below.</p>`
+          : `<p class="hint">Pick from the list or type any ticker you have a price for.</p>`}</div>
+
+      <div class="field"><label class="f">Size</label>
+        <div class="seg">
+          <button type="button" data-mode="shares" aria-pressed="${t.mode === "shares"}">Shares</button>
+          <button type="button" data-mode="amount" aria-pressed="${t.mode === "amount"}">Cash</button>
+        </div></div>
+
+      <div class="two" style="margin-top:12px">
+        <div class="field" style="margin:0">
+          <label class="f" for="t-qty">${t.mode === "shares" ? "Quantity" : "Spend"}</label>
+          <input id="t-qty" class="num-in" inputmode="decimal" autocomplete="off"
+                 placeholder="${t.mode === "shares" ? "10" : "5000"}"></div>
+        <div class="field" style="margin:0"><label class="f" for="t-price">Price</label>
+          <input id="t-price" class="num-in" inputmode="decimal" autocomplete="off"
+                 placeholder="${quote ? plain(D(quote.price), 4) : "0.00"}"></div>
+      </div>
+      <p class="hint">Leave the price blank to fill at the stored market price.</p>
+      ${t.side === "SELL" && held > ZERO
+        ? `<button class="mini" data-act="sell-all" style="margin-top:10px">Sell all ${fmtShares(held)} ${esc(t.symbol)}</button>` : ""}
+
+      <div class="field"><label class="f" for="t-note">Note <span style="text-transform:none;letter-spacing:0">(optional)</span></label>
+        <input id="t-note" autocomplete="off" placeholder="week 3 pick"></div>
+    </div>
+    <div class="pad ticket-total" id="t-preview"></div>
+    <div class="pad" style="padding-top:0">
+      <button class="btn ${t.side === "BUY" ? "primary" : "danger"}" id="t-go" style="margin-top:14px">
+        ${t.side === "BUY" ? "Buy" : "Sell"}${t.symbol ? " " + esc(t.symbol) : ""}</button>
+      <div id="t-msg"></div>
+    </div>
+  </div>`;
+  updatePreview();
+}
+
+function ticketInputs() {
+  const t = state.ticket;
+  const symbol = ($("#t-symbol") ? $("#t-symbol").value : "").trim().toUpperCase();
+  const qtyRaw = ($("#t-qty") ? $("#t-qty").value : "").trim();
+  const priceRaw = ($("#t-price") ? $("#t-price").value : "").trim();
+  let price = null, err = null;
+  try { price = priceRaw ? qPrice(D(priceRaw)) : priceOf(symbol); }
+  catch (e) { err = "That price isn't a number."; }
+  let shares = null;
+  if (!err && qtyRaw) {
+    try {
+      if (t.mode === "shares") shares = D(qtyRaw);
+      else if (price && price > ZERO) {
+        const raw = dvd(D(qtyRaw), price);
+        shares = rules().allowFractional ? raw : (raw / S) * S;   // whole shares round down
+      }
+    } catch (e) { err = "That quantity isn't a number."; }
+  }
+  return { symbol, shares, price, err, note: ($("#t-note") ? $("#t-note").value : "").trim() };
+}
+function updatePreview() {
+  const box = $("#t-preview"); if (!box) return;
+  const t = state.ticket, { symbol, shares, price, err } = ticketInputs();
+  if (err) { box.innerHTML = `<span class="down">${esc(err)}</span>`; return; }
+  if (!symbol || !shares || shares <= ZERO || !price || price <= ZERO) {
+    box.innerHTML = `<span style="color:var(--faint);font-size:13px">Enter a symbol and size to see the fill.</span>`;
+    return;
+  }
+  const notional = qCash(mul(shares, price));
+  const fee = commissionOn(notional);
+  const pf = replay(t.player);
+  const after = qCash(pf.cash + (t.side === "BUY" ? -(notional + fee) : notional - fee));
+  box.innerHTML = `<div class="row" style="padding:0"><span class="k">${fmtShares(shares)} × ${fmtMoney(price)}</span>
+      <span class="v">${fmtMoney(notional)}</span></div>
+    ${fee !== ZERO ? `<div class="row" style="padding:4px 0 0"><span class="k">Fee</span><span class="v">${fmtMoney(fee)}</span></div>` : ""}
+    <div class="row" style="padding:4px 0 0"><span class="k">Cash afterwards</span>
+      <span class="v ${after < ZERO ? "down" : ""}">${fmtMoney(after)}</span></div>`;
+}
+
+function renderBook() {
+  const el = $("#tab-book");
+  if (!state.players.length) { el.innerHTML = `<div class="panel"><div class="empty">No players yet.</div></div>`; return; }
+  if (!state.bookPlayer || !state.players.some(p => p.id === state.bookPlayer))
+    state.bookPlayer = state.players[0].id;
+  const v = valuate(replay(state.bookPlayer));
+  const pf = v.pf;
+  let html = `<div class="field" style="margin-bottom:14px">
+    <label class="f" for="b-player">Whose book</label>
+    <select id="b-player">${state.players.map(p =>
+      `<option value="${esc(p.id)}"${p.id === state.bookPlayer ? " selected" : ""}>${esc(p.name)}</option>`).join("")}</select></div>`;
+
+  html += `<div class="panel"><div class="grid2">
+      <div class="cell"><div class="lbl">Equity</div><div class="big">${fmtMoney(v.equity)}</div></div>
+      <div class="cell"><div class="lbl">Total P&amp;L</div>
+        <div class="big ${dirClass(v.pnl)}">${fmtSigned(v.pnl)}</div></div>
+      <div class="cell"><div class="lbl">Cash</div><div class="big">${fmtMoney(pf.cash)}</div></div>
+      <div class="cell"><div class="lbl">Today</div>
+        <div class="big ${dirClass(v.day)}">${fmtSigned(v.day)}</div></div>
+    </div>
+    <div class="divide" style="border-top:1px solid var(--line-soft)">
+      <div class="row"><span class="k">Return on ${fmtMoney(pf.base)} staked</span>
+        <span class="v ${dirClass(v.pnl)}">${fmtPct(v.ret)}</span></div>
+      <div class="row"><span class="k">Realised</span>
+        <span class="v ${dirClass(pf.realized)}">${fmtSigned(pf.realized)}</span></div>
+      <div class="row"><span class="k">Unrealised</span>
+        <span class="v ${dirClass(v.unreal)}">${fmtSigned(v.unreal)}</span></div>
+      <div class="row"><span class="k">Fees paid</span><span class="v">${fmtMoney(pf.fees)}</span></div>
+    </div></div>`;
+
+  if (v.rows.length) {
+    html += `<p class="eyebrow" style="margin-top:18px">Positions</p><div class="panel divide">`;
+    html += v.rows.map(r => {
+      const weight = pctOf(absD(r.value), v.equity);
+      const retPct = pctOf(r.unreal, absD(r.pos.cost));
+      return `<div class="line">
+        <div class="sym">${esc(r.pos.symbol)}${r.pos.shares < ZERO ? ` <span style="color:var(--down);font-size:11px">SHORT</span>` : ""}</div>
+        <div class="val">${fmtMoney(r.value)}</div>
+        <div class="sub">${fmtShares(r.pos.shares)} @ ${fmtMoney(r.avg)} · ${r.priced ? fmtMoney(r.price) + " now" : "no price"} · ${plain(weight, 1)}% of book</div>
+        <div class="val2 ${dirClass(r.unreal)}">${fmtSigned(r.unreal)} · ${fmtPct(retPct)}</div>
+      </div>`;
+    }).join("");
+    html += `</div>`;
+    if (v.unpriced.length)
+      html += `<p class="hint">${esc(v.unpriced.join(", "))} held at cost — no price stored yet.</p>`;
+  } else {
+    html += `<div class="panel" style="margin-top:14px"><div class="empty">All cash. No positions open.</div></div>`;
+  }
+
+  const mine = state.ledger.filter(e => e.player === state.bookPlayer).slice(-8).reverse();
+  if (mine.length) {
+    html += `<p class="eyebrow" style="margin-top:18px">Recent trades</p>
+      <div class="panel divide">${mine.map(tapeRow).join("")}</div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderMarket() {
+  const el = $("#tab-market");
+  const held = new Set();
+  state.players.forEach(p => replay(p.id).open.forEach(x => held.add(x.symbol)));
+  const list = Object.values(state.prices).sort((a, b) => {
+    const h = (held.has(b.symbol) ? 1 : 0) - (held.has(a.symbol) ? 1 : 0);
+    return h || a.symbol.localeCompare(b.symbol);
+  });
+  let html = `<div class="panel"><div class="pad">
+      <p class="eyebrow">Update a price</p>
+      <div class="two">
+        <div class="field" style="margin:0"><label class="f" for="m-sym">Symbol</label>
+          <input id="m-sym" class="num-in" autocapitalize="characters" autocomplete="off"
+                 spellcheck="false" placeholder="AAPL"></div>
+        <div class="field" style="margin:0"><label class="f" for="m-price">Price</label>
+          <input id="m-price" class="num-in" inputmode="decimal" autocomplete="off" placeholder="334.21"></div>
+      </div>
+      <button class="btn" id="m-go" style="margin-top:12px">Save price</button>
+      <div id="m-msg"></div>
+      <p class="hint">Every valuation uses these prices. Ask Claude to refresh them from
+        the live market, or type one in from your own stocks app.</p>
+    </div></div>`;
+
+  if (list.length) {
+    html += `<p class="eyebrow" style="margin-top:18px">Market</p><div class="panel divide">`;
+    html += list.map(p => {
+      const price = D(p.price);
+      const prev = p.prevClose ? D(p.prevClose) : null;
+      const chg = prev ? price - prev : ZERO;
+      const chgPct = prev ? pctOf(chg, prev) : ZERO;
+      return `<div class="line">
+        <div class="sym">${esc(p.symbol)}${held.has(p.symbol) ? ` <span class="chip flat" style="font-size:10px">held</span>` : ""}</div>
+        <div class="val">${fmtMoney(price)}</div>
+        <div class="sub">${esc((p.name || "").slice(0, 34))} · ${esc(ago(p.asOf))}</div>
+        <div class="val2 ${prev ? dirClass(chg) : ""}">${prev ? fmtPct(chgPct) : "—"}</div>
+      </div>`;
+    }).join("");
+    html += `</div>`;
+  } else {
+    html += `<div class="panel" style="margin-top:14px"><div class="empty">No prices stored yet.</div></div>`;
+  }
+  el.innerHTML = html;
+}
+
+function renderLeague() {
+  const el = $("#tab-league");
+  if (!state.config) { el.innerHTML = setupCard(); return; }
+  const r = rules(), c = state.config;
+  let html = exampleBanner();
+
+  html += `<p class="eyebrow">Players</p><div class="panel divide">`;
+  html += state.players.map(p => {
+    const pf = replay(p.id);
+    return `<div class="row">
+      <span class="who"><b>${esc(p.name)}</b>
+        <span>${fmtMoney(pf.cash)} cash · ${pf.trades} trade${pf.trades === 1 ? "" : "s"}</span></span>
+      <button class="mini" data-act="drop-player" data-id="${esc(p.id)}"
+              aria-label="Remove ${esc(p.name)}">Remove</button></div>`;
+  }).join("") || `<div class="empty">Nobody's playing yet.</div>`;
+  html += `<div class="pad"><div class="two">
+      <input id="p-name" placeholder="New player" autocomplete="off">
+      <button class="btn" id="p-add">Add player</button></div>
+      <div id="p-msg"></div></div></div>`;
+
+  html += `<p class="eyebrow" style="margin-top:18px">House rules</p><div class="panel divide">
+    <div class="row"><span class="k">Starting stake</span><span class="v">${fmtMoney(r.startingCash)}</span></div>
+    <div class="row"><span class="k">Fee per trade</span><span class="v">${fmtMoney(r.commissionFlat)}${r.commissionPct !== ZERO ? " + " + plain(r.commissionPct, 3) + "%" : ""}</span></div>
+    <div class="row"><span class="k">Fractional shares</span>
+      <button class="mini" data-act="toggle" data-key="allowFractional">${r.allowFractional ? "On" : "Off"}</button></div>
+    <div class="row"><span class="k">Short selling</span>
+      <button class="mini" data-act="toggle" data-key="allowShort">${r.allowShort ? "On" : "Off"}</button></div>
+    <div class="row"><span class="k">Borrowing (negative cash)</span>
+      <button class="mini" data-act="toggle" data-key="allowNegativeCash">${r.allowNegativeCash ? "On" : "Off"}</button></div>
+    <div class="row"><span class="k">Position cap</span>
+      <span class="v">${r.maxPositionPct !== null ? plain(r.maxPositionPct, 2) + "% of equity" : "none"}</span></div>
+    </div><p class="hint">Rule changes apply to future trades. The ledger is never rewritten.</p>`;
+
+  html += `<p class="eyebrow" style="margin-top:18px">Scorekeeping</p><div class="panel">
+    <div class="pad"><div class="two">
+      <input id="snap-label" placeholder="Week 1" autocomplete="off">
+      <button class="btn" id="snap-go">Record standings</button></div>
+      <p class="hint">Freezes everyone's equity so you can score week by week.</p>
+      <div id="snap-msg"></div></div>`;
+  if (state.snapshots.length) {
+    html += `<div class="divide" style="border-top:1px solid var(--line-soft)">` +
+      state.snapshots.slice().reverse().map(s => {
+        const best = Object.entries(s.equity || {})
+          .sort((a, b) => (D(b[1]) > D(a[1]) ? 1 : -1))[0];
+        const who = best && state.players.find(p => p.id === best[0]);
+        return `<div class="row"><span class="k">${esc(s.label || shortWhen(s.at))}</span>
+          <span class="v">${who ? esc(who.name) + " · " + fmtMoney(D(best[1])) : "—"}</span></div>`;
+      }).join("") + `</div>`;
+  }
+  html += `</div>`;
+
+  if (state.ledger.length) {
+    html += `<p class="eyebrow" style="margin-top:18px">Full tape</p><div class="panel divide">`;
+    html += state.ledger.slice().reverse().slice(0, 60).map(e => tapeRow(e, true)).join("");
+    html += `</div><p class="hint">Undo removes the entry and recomputes every figure from what's left.</p>`;
+  }
+
+  html += `<p class="eyebrow" style="margin-top:18px">Danger zone</p>
+    <div class="panel"><div class="pad">
+      <button class="btn danger" data-act="reset-league">Delete league and start over</button>
+      <p class="hint">Removes every player, trade and snapshot. Prices are kept.</p>
+    </div></div>`;
+  el.innerHTML = html;
+}
+
+function renderAll() {
+  if (!state.ready) return;
+  if (!state.db) {
+    $("#tab-board").innerHTML = `<div class="panel"><div class="pad">
+      <p class="eyebrow">Offline</p>
+      <p style="margin:0">This view can't reach the league's data, so nothing can be shown or saved.
+      Open the page from your artifact list and allow storage when asked.</p></div></div>`;
+    return;
+  }
+  renderHeader();
+  renderBoard(); renderTrade(); renderBook(); renderMarket(); renderLeague();
+}
+function showTab(name) {
+  state.tab = name;
+  for (const b of document.querySelectorAll(".tab"))
+    b.setAttribute("aria-selected", String(b.dataset.tab === name));
+  for (const id of ["board", "trade", "book", "market", "league"])
+    $("#tab-" + id).hidden = id !== name;
+  window.scrollTo({ top: 0, behavior: "instant" in window ? "instant" : "auto" });
+}
+function say(sel, text, good) {
+  const el = $(sel); if (!el) return;
+  el.innerHTML = text ? `<div class="msg ${good ? "good" : "bad"}">${esc(text)}</div>` : "";
+}
+
+/* =========================================================================
+   Interaction
+   ========================================================================= */
+document.addEventListener("click", async ev => {
+  const tab = ev.target.closest(".tab");
+  if (tab) { showTab(tab.dataset.tab); return; }
+
+  const side = ev.target.closest(".seg.side button");
+  if (side) { state.ticket.side = side.dataset.side; renderTrade(); return; }
+  const mode = ev.target.closest("[data-mode]");
+  if (mode) { state.ticket.mode = mode.dataset.mode; renderTrade(); return; }
+
+  const act = ev.target.closest("[data-act]");
+  if (act) { await handleAction(act); return; }
+
+  if (ev.target.closest("#s-frac") || ev.target.closest("#s-short")) {
+    const b = ev.target.closest("button");
+    b.setAttribute("aria-pressed", b.getAttribute("aria-pressed") === "true" ? "false" : "true");
+    return;
+  }
+  if (ev.target.closest("#s-go")) return createLeague();
+  if (ev.target.closest("#t-go")) return placeTrade();
+  if (ev.target.closest("#m-go")) return savePrice();
+  if (ev.target.closest("#p-add")) return addPlayer();
+  if (ev.target.closest("#snap-go")) return recordSnapshot();
+});
+document.addEventListener("input", ev => {
+  const id = ev.target.id;
+  if (id === "t-symbol") { state.ticket.symbol = ev.target.value.trim().toUpperCase(); updatePreview(); }
+  else if (id === "t-qty" || id === "t-price") updatePreview();
+});
+document.addEventListener("change", ev => {
+  if (ev.target.id === "t-player") { state.ticket.player = ev.target.value; renderTrade(); }
+  if (ev.target.id === "b-player") { state.bookPlayer = ev.target.value; renderBook(); }
+  if (ev.target.id === "t-symbol") renderTrade();
+});
+
+async function handleAction(el) {
+  const act = el.dataset.act;
+  if (act === "sell-all") {
+    const pf = replay(state.ticket.player);
+    const held = positionOf(pf, state.ticket.symbol).shares;
+    state.ticket.mode = "shares"; renderTrade();
+    $("#t-qty").value = fmtShares(held); updatePreview(); return;
+  }
+  if (act === "toggle") {
+    const key = el.dataset.key;
+    try { await state.db.doc("league/config").update({ [key]: !state.config[key] }); }
+    catch (e) { alert(dbFail(e)); }
+    return;
+  }
+  if (act === "drop-player") {
+    const p = state.players.find(x => x.id === el.dataset.id);
+    if (!p || !confirm(`Remove ${p.name} and every trade they made?`)) return;
+    try {
+      await state.db.doc("players/" + p.id).delete();
+      for (const e of state.ledger.filter(e => e.player === p.id))
+        await state.db.doc("ledger/" + e.id).delete();
+    } catch (e) { alert(dbFail(e)); }
+    return;
+  }
+  if (act === "undo") {
+    const e = state.ledger.find(x => x.id === el.dataset.id);
+    if (!e || !confirm("Remove this entry from the ledger?")) return;
+    try { await state.db.doc("ledger/" + e.id).delete(); }
+    catch (err) { alert(dbFail(err)); }
+    return;
+  }
+  if (act === "reset-league") {
+    if (!confirm("Delete every player, trade and snapshot? Prices are kept.")) return;
+    try {
+      for (const p of state.players) await state.db.doc("players/" + p.id).delete();
+      for (const e of state.ledger) await state.db.doc("ledger/" + e.id).delete();
+      for (const s of state.snapshots) await state.db.doc("snapshots/" + s.id).delete();
+      await state.db.doc("league/config").delete();
+      state.config = null; state.players = []; state.ledger = []; state.snapshots = [];
+      showTab("board"); renderAll();
+    } catch (e) { alert(dbFail(e)); }
+  }
+}
+
+async function createLeague() {
+  const name = $("#s-name").value.trim() || "Fantasy Stock Exchange";
+  let cash, fee;
+  try { cash = qCash(D($("#s-cash").value || "100000")); fee = qCash(D($("#s-fee").value || "0")); }
+  catch (e) { return say("#s-msg", "The stake and fee both need to be numbers."); }
+  if (cash <= ZERO) return say("#s-msg", "The starting stake has to be more than zero.");
+  try {
+    await state.db.doc("league/config").set({
+      name, currency: "USD", startingCash: plain(cash), commissionFlat: plain(fee),
+      commissionPct: "0", allowFractional: $("#s-frac").getAttribute("aria-pressed") === "true",
+      allowShort: $("#s-short").getAttribute("aria-pressed") === "true",
+      allowNegativeCash: false, maxPositionPct: null, createdAt: nowISO(), isExample: false,
+    });
+    showTab("league");
+  } catch (e) { say("#s-msg", dbFail(e)); }
+}
+
+async function addPlayer() {
+  const name = $("#p-name").value.trim();
+  if (!name) return say("#p-msg", "Give the player a name.");
+  let id = slug(name), n = 2;
+  while (state.players.some(p => p.id === id)) id = slug(name) + "-" + n++;
+  try {
+    await state.db.doc("players/" + id).set({
+      id, name, startingCash: plain(rules().startingCash), joinedAt: nowISO(),
+    });
+    $("#p-name").value = ""; say("#p-msg", "");
+  } catch (e) { say("#p-msg", dbFail(e)); }
+}
+
+async function placeTrade() {
+  const t = state.ticket;
+  const { symbol, shares, price, err, note } = ticketInputs();
+  if (err) return say("#t-msg", err);
+  if (!symbol) return say("#t-msg", "Enter a symbol.");
+  if (!price || price <= ZERO)
+    return say("#t-msg", `No price stored for ${symbol}. Save one in Market, or type a price on the ticket.`);
+  if (!shares || shares <= ZERO)
+    return say("#t-msg", t.mode === "amount"
+      ? `That's not enough to buy a whole share of ${symbol} at ${fmtMoney(price)}.`
+      : "Enter how many shares to trade.");
+  const notional = qCash(mul(shares, price));
+  const fee = commissionOn(notional);
+  const problem = checkTrade(t.player, t.side, symbol, shares, price, fee);
+  if (problem) return say("#t-msg", problem);
+  try {
+    await writeLedger({
+      kind: t.side, player: t.player, at: nowISO(), symbol,
+      shares: plain(shares), price: plain(qPrice(price)), commission: plain(fee),
+      amount: "0", note,
+    });
+    const who = state.players.find(p => p.id === t.player);
+    say("#t-msg", `${t.side === "BUY" ? "Bought" : "Sold"} ${fmtShares(shares)} ${symbol} at ${fmtMoney(price)} for ${who ? who.name : ""}.`, true);
+    $("#t-qty").value = ""; $("#t-price").value = ""; $("#t-note").value = "";
+    updatePreview();
+  } catch (e) { say("#t-msg", dbFail(e)); }
+}
+
+async function savePrice() {
+  const symbol = $("#m-sym").value.trim().toUpperCase();
+  if (!symbol) return say("#m-msg", "Enter a symbol.");
+  let price;
+  try { price = qPrice(D($("#m-price").value)); }
+  catch (e) { return say("#m-msg", "That price isn't a number."); }
+  if (price <= ZERO) return say("#m-msg", "The price has to be more than zero.");
+  const existing = state.prices[symbol];
+  try {
+    await state.db.doc("prices/" + encSym(symbol)).set({
+      symbol, price: plain(price),
+      prevClose: existing ? existing.price : null,
+      name: existing ? existing.name : "", asOf: nowISO(), source: "entered by hand",
+    });
+    $("#m-sym").value = ""; $("#m-price").value = "";
+    say("#m-msg", `${symbol} is now ${fmtMoney(price)}.`, true);
+  } catch (e) { say("#m-msg", dbFail(e)); }
+}
+
+async function recordSnapshot() {
+  const label = $("#snap-label").value.trim();
+  const equity = {};
+  for (const v of standings()) equity[v.pf.player.id] = plain(v.equity);
+  const id = String(Date.now()).padStart(15, "0");
+  try {
+    await state.db.doc("snapshots/" + id).set({ id, at: nowISO(), label, equity });
+    $("#snap-label").value = "";
+    say("#snap-msg", "Standings recorded.", true);
+  } catch (e) { say("#snap-msg", dbFail(e)); }
+}
+
+/* =========================================================================
+   Boot
+   ========================================================================= */
+showTab("board");
+$("#tab-board").innerHTML = `<div class="panel"><div class="empty">Opening the exchange…</div></div>`;
+connect().catch(err => {
+  console.error(err);
+  state.ready = true; state.db = null; renderAll();
+});
+setInterval(() => { if (state.ready && state.db) renderHeader(); }, 60000);
+</script>
