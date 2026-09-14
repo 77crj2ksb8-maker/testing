@@ -1,0 +1,18 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "fsx"
+version = "1.0.0"
+description = "Run a fantasy stock exchange league priced off real market data"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+dependencies = []
+
+[project.scripts]
+fsx = "fsx.cli:main"
+
+[tool.setuptools]
+packages = ["fsx"]
