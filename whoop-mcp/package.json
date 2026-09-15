@@ -1,0 +1,29 @@
+{
+  "name": "whoop-mcp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Model Context Protocol server exposing WHOOP API v2 data to Claude.",
+  "type": "module",
+  "bin": {
+    "whoop-mcp": "dist/stdio.js",
+    "whoop-mcp-login": "dist/login.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "login": "node dist/login.js",
+    "start": "node dist/stdio.js",
+    "typecheck": "tsc --noEmit",
+    "test": "npm run build && node --test \"test/*.test.mjs\""
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.6.5"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
