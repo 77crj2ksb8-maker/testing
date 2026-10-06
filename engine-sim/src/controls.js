@@ -252,7 +252,7 @@ export class HShifter {
 }
 
 /** Keyboard shortcuts for desktop testing. */
-export function bindKeyboard({ gas, clutch, brake, onGear, onStart, onToggle }) {
+export function bindKeyboard({ gas, clutch, brake, onGear, onStart, onToggle, onShiftUp, onShiftDown, onKey }) {
   const held = new Set();
   const setPedals = () => {
     gas.keyHeld = held.has('gas') ? 1 : 0;
@@ -280,7 +280,10 @@ export function bindKeyboard({ gas, clutch, brake, onGear, onStart, onToggle }) 
     else if (k === 'r') onGear('R');
     else if (k === 'n' || k === '0') onGear('N');
     else if (k === 'enter' || k === 'i') onStart();
+    else if (k === 'e' || k === 'pageup') onShiftUp?.();
+    else if (k === 'q' || k === 'pagedown') onShiftDown?.();
     else if (k === 'm' || k === 't' || k === 'g' || k === 'v' || k === 'escape') onToggle(k);
+    else onKey?.(k, e);
   });
   window.addEventListener('keyup', (e) => {
     const p = pedalFor(e);

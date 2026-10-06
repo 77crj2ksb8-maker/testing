@@ -765,6 +765,55 @@ export class EngineView {
     }
   }
 
+  // ── View API used by other tracks (docs/CONTRACT.md → "EngineView API").
+  // Placeholders until the visuals track implements them.
+
+  /** Apply display settings: strokeGases, valvetrain, xray, cutaway, quality. Receives the full settings object. */
+  setDisplay(settings) {
+    this.display = { ...settings };
+  }
+
+  /** Animate towards an exploded view: 0 = assembled, 1 = fully exploded. */
+  setExplode(target) {
+    this.explodeTarget = target;
+  }
+
+  /** Camera preset names, in cycle order. */
+  get cameraPresets() {
+    return ['hero'];
+  }
+
+  /** Fly the camera to a named preset; returns a human-readable label. */
+  setCameraPreset(name) {
+    if (name === 'hero') this.resetView();
+    return 'Hero';
+  }
+
+  /** Slow automatic orbit; any user camera input turns it off. */
+  setCinematic(on) {
+    this.cinematic = on;
+  }
+
+  /** Camera shake impulse, 0..1. */
+  shake(amount) {
+    this.shakeAmount = amount;
+  }
+
+  /** One-shot effect: kind 'flame' | 'bov' | 'smoke' | 'sparks'; opts.strength 0..1. */
+  burst(kind, opts = {}) {
+    this.lastBurst = { kind, opts };
+  }
+
+  /** Catastrophic failure visuals. */
+  blowUp() {
+    this.isBlown = true;
+  }
+
+  /** Undo blowUp(). */
+  restore() {
+    this.isBlown = false;
+  }
+
   render() {
     this.renderer.render(this.scene, this.camera);
   }

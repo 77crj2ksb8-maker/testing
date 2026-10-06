@@ -215,9 +215,32 @@ output { font-variant-numeric: tabular-nums; }
   outline-offset: 2px;
 }
 
+/* ── Feature containers ──────────────────────────────────────────────────── */
+.hud-extra:empty { display: none; }
+.hud-extra { display: flex; flex-direction: column; gap: 6px; margin-top: 8px; }
+.tool-rail {
+  position: absolute;
+  right: calc(var(--safe-right) + var(--gutter));
+  top: calc(var(--hud-top-h, 120px) + 10px);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 2;
+}
+.tool-rail:empty { display: none; }
+.tool-btn[aria-pressed='true'] { border-color: var(--throttle); }
+.tool-btn[aria-pressed='true'] svg { stroke: var(--throttle); }
+.overlay-root { position: absolute; inset: 0; pointer-events: none; z-index: 3; }
+.overlay-root > * { pointer-events: auto; }
+.panel-extra { display: flex; flex-direction: column; gap: 12px; }
+.panel-extra:empty { display: none; }
+.telemetry .panel-extra { margin-top: 14px; }
+.sheet .panel-extra { margin-bottom: 14px; }
+
 /* ── Toast and stall card ────────────────────────────────────────────────── */
 .toast {
   position: absolute;
+  z-index: 5;
   left: 50%;
   top: calc(var(--safe-top) + 128px);
   transform: translate(-50%, -8px);
@@ -240,6 +263,7 @@ output { font-variant-numeric: tabular-nums; }
 
 .stall-card {
   position: absolute;
+  z-index: 4;
   left: 50%;
   top: 42%;
   transform: translate(-50%, -50%);
@@ -420,6 +444,7 @@ output { font-variant-numeric: tabular-nums; }
 
 .telemetry {
   position: absolute;
+  z-index: 3;
   top: calc(var(--safe-top) + 118px);
   bottom: calc(var(--safe-bottom) + var(--controls-h, 200px));
   left: calc(var(--safe-left) + var(--gutter));
@@ -490,6 +515,7 @@ output { font-variant-numeric: tabular-nums; }
 /* Settings sheet */
 .sheet-backdrop {
   position: absolute;
+  z-index: 6;
   inset: 0;
   display: flex;
   align-items: flex-end;

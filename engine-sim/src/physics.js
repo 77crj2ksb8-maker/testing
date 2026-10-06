@@ -68,6 +68,42 @@ export class Drivetrain {
     this.distance = 0;
     this.time = 0;
     this.events = [];
+
+    // ── Contract fields (docs/CONTRACT.md). Defaults are inert placeholders
+    // that the powertrain track replaces with real models.
+    this.inductionKind = 'na'; // 'na' | 'turbo' | 'twin-turbo' | 'supercharger'
+    this.boostBar = 0; // manifold pressure, bar gauge (negative = vacuum)
+    this.boostTarget = 0;
+    this.turboRpm = 0; // turbo shaft rpm (0 for NA/supercharger)
+    this.coolantC = 88;
+    this.oilC = 95;
+    this.egtC = 350; // exhaust gas temperature, °C
+    this.damage = 0; // 0 healthy … 1 destroyed
+    this.blown = false; // catastrophic failure: cannot run until repair()
+    this.vvlActive = false; // high-lift cam engaged
+    this.launchActive = false; // two-step limiter currently holding revs
+    this.tcActive = false; // traction control currently cutting torque
+    this.limiterRpm = this.profile.redlineRpm;
+    this.assists = { autoBlip: false, launchControl: false, launchRpm: 4500, tractionControl: false };
+  }
+
+  /** Apply runtime options from the settings object (assists, induction). Called on every settings change. */
+  configure(settings) {
+    this.assists = {
+      autoBlip: !!settings.autoBlip,
+      launchControl: !!settings.launchControl,
+      launchRpm: settings.launchRpm ?? 4500,
+      tractionControl: !!settings.tractionControl,
+    };
+    this.inductionKind = settings.induction ?? 'na';
+  }
+
+  /** Undo damage and let a blown engine run again. */
+  repair() {
+    this.damage = 0;
+    this.blown = false;
+    this.coolantC = 88;
+    this.oilC = 95;
   }
 
   // ── Derived quantities ────────────────────────────────────────────────────

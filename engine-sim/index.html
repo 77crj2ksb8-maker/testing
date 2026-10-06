@@ -45,9 +45,11 @@
         <div class="tach-row tach-sub">
           <output id="gear" class="gear-badge">N</output>
           <span id="mode-tag" class="mode-tag" hidden>AUTO</span>
-          <span class="speed"><output id="speed">0</output> <span class="unit">km/h</span></span>
+          <span class="speed"><output id="speed">0</output> <span id="speed-unit" class="unit">km/h</span></span>
           <span id="traction" class="pill pill-amber" hidden>WHEELSPIN</span>
         </div>
+        <!-- Feature-owned HUD rows (gauges, shift lights) go here. -->
+        <div id="hud-extra" class="hud-extra"></div>
       </section>
 
       <section class="hud-right">
@@ -70,10 +72,16 @@
       </section>
     </header>
 
+    <!-- Feature-owned tool buttons (camera, display modes, game modes). -->
+    <nav id="tool-rail" class="tool-rail" aria-label="View and mode tools"></nav>
+
+    <!-- Feature-owned full-screen overlays (drag tree, dyno, labels). Pointer events off by default. -->
+    <div id="overlay-root" class="overlay-root"></div>
+
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
     <section id="stall" class="stall-card" hidden aria-live="assertive">
-      <p class="stall-title">Engine stalled</p>
+      <p id="stall-title" class="stall-title">Engine stalled</p>
       <p id="stall-help" class="stall-help">Press the clutch or select neutral, then start.</p>
       <button id="btn-start" class="start-btn" type="button">START</button>
     </section>
@@ -116,6 +124,9 @@
         <ol id="shift-list" class="shift-list"></ol>
         <p id="shift-empty" class="empty">No shifts yet. Each shift is scored on rev match at the bite point, heat put into the clutch and time between gears.</p>
       </div>
+
+      <!-- Feature-owned telemetry sections. -->
+      <div id="telemetry-extra" class="panel-extra"></div>
     </section>
 
     <footer class="hud-bottom">
@@ -189,7 +200,8 @@
         <fieldset class="field">
           <legend>Transmission</legend>
           <div id="opt-mode" class="chips" role="radiogroup" aria-label="Transmission mode">
-            <button type="button" class="chip" role="radio" data-value="manual">Manual</button>
+            <button type="button" class="chip" role="radio" data-value="manual">H-pattern</button>
+            <button type="button" class="chip" role="radio" data-value="sequential">Sequential</button>
             <button type="button" class="chip" role="radio" data-value="auto">Automatic</button>
           </div>
           <p class="field-note">Automatic shifts up near redline and down below 2000 rpm; the clutch is automated.</p>
@@ -210,6 +222,9 @@
           </div>
           <p id="opt-gearing-note" class="field-note"></p>
         </fieldset>
+
+        <!-- Feature-owned settings sections. -->
+        <div id="settings-extra" class="panel-extra"></div>
 
         <div class="sheet-actions">
           <button id="btn-defaults" class="text-btn" type="button">Restore defaults</button>

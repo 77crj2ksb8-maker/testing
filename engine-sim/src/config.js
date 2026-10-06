@@ -87,14 +87,35 @@ export const PRESETS = Object.freeze({
 
 export const PRESET_ORDER = ['v8-cross', 'v8-flat', 'i4', 'v6', 'rotary'];
 
+// Every persisted setting. See docs/CONTRACT.md for who reads each field.
 export const DEFAULT_SETTINGS = Object.freeze({
+  // Engine
   preset: 'v8-cross',
   cylinders: 8,
   idleRpm: 800,
   redlineRpm: null, // null → the layout's own default
   boreStroke: 1.0,
+  displacementL: null, // null → the layout's own default
+  vvlRpm: null, // variable valve lift switchover rpm; null → no cam switching
+  garage: null, // id of the garage preset last loaded, or null
+  // Forced induction
+  induction: 'na', // 'na' | 'turbo' | 'twin-turbo' | 'supercharger'
+  boostBar: 0.8, // target boost, bar (gauge)
+  // Transmission
+  mode: 'manual', // 'manual' (H-pattern) | 'sequential' | 'auto'
+  autoBlip: false, // rev-match downshifts automatically (manual/sequential)
+  launchControl: false, // two-step limiter while stationary with the clutch in
+  launchRpm: 4500,
+  tractionControl: false,
+  // Display
   visualSpeed: 1 / 25,
-  mode: 'manual',
+  strokeGases: true, // tint each cylinder by stroke (intake/compression/power/exhaust)
+  valvetrain: true, // show cams and valves
+  xray: false,
+  cutaway: false,
+  quality: 'auto', // 'auto' | 'high' | 'low'
+  cluster: 'digital', // 'digital' | 'analog'
+  units: 'kmh', // 'kmh' | 'mph'
   ...DRIVETRAIN_DEFAULTS,
 });
 

@@ -96,6 +96,27 @@ export class Gearbox {
     return 1;
   }
 
+  /** Sequential box: one gear up. Returns { ok, reason?, gear }. Placeholder until the powertrain track lands. */
+  shiftUp() {
+    const g = this.sim.gear;
+    const next = g === 'R' ? 'N' : g === 'N' ? 1 : Math.min(this.sim.drive.gearRatios.length, g + 1);
+    const res = this.request(next);
+    return { ...res, gear: this.sim.gear };
+  }
+
+  /** Sequential box: one gear down. Returns { ok, reason?, gear }. */
+  shiftDown() {
+    const g = this.sim.gear;
+    const next = g === 'N' ? 'R' : g === 1 ? 'N' : g === 'R' ? 'R' : g - 1;
+    const res = this.request(next);
+    return { ...res, gear: this.sim.gear };
+  }
+
+  /** Apply runtime options from the settings object. Called on every settings change. */
+  configure(settings) {
+    this.assists = { autoBlip: !!settings.autoBlip };
+  }
+
   /** Called every frame before the physics step. */
   update(dt, { gas, clutch, brake }) {
     const sim = this.sim;

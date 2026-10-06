@@ -1,4 +1,5 @@
-// Bootstraps the simulator: state, render loop, input and HUD wiring.
+// Bootstraps the simulator: builds the shared `app` context (docs/CONTRACT.md),
+// installs the feature modules and runs the frame loop.
 
 import { buildProfile, DEFAULT_SETTINGS, DRIVETRAIN_DEFAULTS, firingOrderLabel } from './config.js';
 import { Drivetrain } from './physics.js';
@@ -8,11 +9,16 @@ import { EngineAudio } from './audio.js';
 import { EngineView } from './scene.js';
 import { Pedal, HShifter, bindKeyboard } from './controls.js';
 import { SettingsPanel, TelemetryPanel, VISUAL_SPEEDS } from './ui.js';
+import { Hud } from './hud.js';
+import { Bus } from './bus.js';
+import { el } from './dom.js';
+import { FEATURES } from './features/index.js';
 
 const $ = (id) => document.getElementById(id);
 const RAD2DEG = 180 / Math.PI;
 const STORAGE_KEY = 'firing-order:settings:v1';
 const DRIVE_KEYS = Object.keys(DRIVETRAIN_DEFAULTS);
+const TICK = 1 / 120; // debug advance() step, seconds
 
 // ── Settings (remembered per browser) ───────────────────────────────────────
 function loadSettings() {
@@ -20,8 +26,16 @@ function loadSettings() {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const saved = JSON.parse(raw);
-      const merged = { ...DEFAULT_SETTINGS, ...saved };
-      if (!Array.isArray(merged.gearRatios) || merged.gearRatios.length !== 5) merged.gearRatios = [...DEFAULT_SETTINGS.gearRatios];
+      const merged = { ...DEFAULT_SETTINGS };
+      // Only keep keys we know, with the type we expect.
+      for (const [k, v] of Object.entries(saved)) {
+        if (!(k in DEFAULT_SETTINGS)) continue;
+        const def = DEFAULT_SETTINGS[k];
+        if (def === null || v === null || typeof v === typeof def) merged[k] = v;
+      }
+      if (!Array.isArray(merged.gearRatios) || merged.gearRatios.length !== 5 || !merged.gearRatios.every((r) => r > 0)) {
+        merged.gearRatios = [...DEFAULT_SETTINGS.gearRatios];
+      }
       return merged;
     }
   } catch {
@@ -39,104 +53,228 @@ function saveSettings(s) {
 }
 
 const driveFrom = (s) => Object.fromEntries(DRIVE_KEYS.map((k) => [k, Array.isArray(s[k]) ? [...s[k]] : s[k]]));
+const debugMode = new URLSearchParams(location.search).has('debug');
 
+// ── Core objects ────────────────────────────────────────────────────────────
 let settings = loadSettings();
 let profile = buildProfile(settings);
 let drive = driveFrom(settings);
 
+const bus = new Bus();
 const sim = new Drivetrain(profile, drive);
 const tracker = new ShiftTracker();
 const gearbox = new Gearbox(sim, tracker);
 const stats = new SessionStats();
 const audio = new EngineAudio();
 audio.setProfile(profile);
-
 const view = new EngineView($('scene'));
-if (new URLSearchParams(location.search).has('debug')) Object.assign(window, { sim, view, gearbox, audio });
-view.setProfile(profile, drive);
+// Rebuild the 3D model only when something that changes its geometry changes.
+const geometryKeyOf = () => `${profile.id}:${profile.boreStroke}:${profile.displacementL}:${settings.induction}:${drive.gearRatios.join()}:${drive.reverseRatio}`;
+view.setProfile(profile, drive, settings);
 let userMovedCamera = false;
-let geometryKey = `${profile.id}:${profile.boreStroke}:${drive.gearRatios.join()}:${drive.reverseRatio}`;
+let geometryKey = geometryKeyOf();
 let soundKey = profile.id;
 
-// ── Controls ────────────────────────────────────────────────────────────────
 const pedals = {
   gas: new Pedal($('pedal-gas'), { pressTime: 0.05, releaseTime: 0.07 }),
   clutch: new Pedal($('pedal-clutch'), { pressTime: 0.06, releaseTime: 0.22 }),
   brake: new Pedal($('pedal-brake'), { pressTime: 0.08, releaseTime: 0.1 }),
 };
-const shifter = new HShifter($('shifter'), $('knob'), (gear) => selectGear(gear, 'lever'));
-
-let toastTimer = 0;
-function toast(message, kind = '') {
-  const el = $('toast');
-  el.textContent = message;
-  el.className = `toast is-on${kind ? ` is-${kind}` : ''}`;
-  clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => el.classList.remove('is-on'), 1900);
-}
-
-function selectGear(gear, source) {
-  const before = sim.gear;
-  const res = gearbox.request(gear);
-  if (res.ok) {
-    if (gear !== 'N' && sim.gear !== before) audio.clunk();
-    if (res.clutchless) toast('Clutchless shift: revs matched', 'good');
-    if (source !== 'lever') shifter.show(sim.gear);
-  } else if (res.grind) {
-    audio.grind();
-    toast(res.reason, 'bad');
-    navigator.vibrate?.(60);
-    if (source !== 'lever') shifter.show(sim.gear);
-  }
-  return res;
-}
-
-function startEngine() {
-  audio.unlock();
-  if (sim.running) return;
-  if (!sim.startEngine()) toast('Press the clutch or select neutral to start', 'warn');
-}
-
+const shifter = new HShifter($('shifter'), $('knob'), (gear) => app.actions.selectGear(gear, 'lever'));
 const telemetry = new TelemetryPanel();
-telemetry.setProfile(profile);
+const settingsPanel = new SettingsPanel((patch, kind) => app.apply(patch, kind));
 
-const settingsPanel = new SettingsPanel(applySettings);
+// ── The shared app context handed to every feature ──────────────────────────
+let toastTimer = 0;
+const app = {
+  bus, sim, gearbox, tracker, stats, audio, view, pedals, shifter, telemetry, settingsPanel,
+  get settings() { return settings; },
+  get profile() { return profile; },
+  get drive() { return drive; },
+  debug: debugMode,
 
-function applySettings(patch, kind) {
-  settings = { ...settings, ...patch };
-  if (kind === 'engine' && settings.redlineRpm !== null) {
-    settings.redlineRpm = Math.max(settings.redlineRpm, settings.idleRpm + 2500);
-  }
-  if (kind === 'engine' || kind === 'drive' || kind === 'all') {
-    profile = buildProfile(settings);
-    drive = driveFrom(settings);
-    sim.setDrive(drive);
-    sim.setProfile(profile);
-    telemetry.setProfile(profile);
-    const key = `${profile.id}:${profile.boreStroke}:${drive.gearRatios.join()}:${drive.reverseRatio}`;
-    if (key !== geometryKey) {
-      geometryKey = key;
-      view.setProfile(profile, drive);
-      layout();
+  // Pedal values for this tick. Features may overwrite them in beforeStep()
+  // (e.g. the dyno holds the throttle open); main passes them to the gearbox.
+  input: { gas: 0, clutch: 0, brake: 0 },
+
+  // Visual crank control. frozen: stop the animation; scrubDeg: show this crank angle.
+  viewState: { frozen: false, scrubDeg: null, crankDeg: 0, inputDeg: 0, outputDeg: 0 },
+
+  toast(message, kind = '', ms = 1900) {
+    const t = $('toast');
+    t.textContent = message;
+    t.className = `toast is-on${kind ? ` is-${kind}` : ''}`;
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => t.classList.remove('is-on'), ms);
+  },
+
+  /** Merge a settings patch, persist it and push it to every consumer. kind: see CONTRACT.md. */
+  apply(patch = {}, kind = 'all') {
+    settings = { ...settings, ...patch };
+    if (settings.redlineRpm !== null && (kind === 'engine' || kind === 'all')) {
+      settings.redlineRpm = Math.max(settings.redlineRpm, settings.idleRpm + 2500);
     }
-    if (profile.id !== soundKey) {
-      soundKey = profile.id;
-      audio.setProfile(profile);
+    if (kind === 'engine' || kind === 'drive' || kind === 'all') {
+      profile = buildProfile(settings);
+      drive = driveFrom(settings);
+      sim.setDrive(drive);
+      sim.setProfile(profile);
+      telemetry.setProfile(profile);
+      const key = geometryKeyOf();
+      if (key !== geometryKey) {
+        geometryKey = key;
+        view.setProfile(profile, drive, settings);
+        layout();
+      }
+      if (profile.id !== soundKey) {
+        soundKey = profile.id;
+        audio.setProfile(profile);
+      }
+      bus.emit('profile', { profile, drive });
     }
+    sim.configure(settings);
+    gearbox.configure(settings);
+    if (kind === 'mode' || kind === 'all') applyMode();
+    view.setDisplay?.(settings);
+    saveSettings(settings);
+    settingsPanel.render(settings, profile, sim);
+    renderProfileLabel();
+    bus.emit('settings', { settings, kind, patch });
+  },
+
+  ui: {
+    overlay: $('overlay-root'),
+    hudExtra: $('hud-extra'),
+    toolRail: $('tool-rail'),
+    telemetryExtra: $('telemetry-extra'),
+    settingsExtra: $('settings-extra'),
+    /** Add a round icon button to the right-hand tool rail. icon: inline SVG markup (static, trusted). */
+    addToolButton({ id, label, icon, onClick, order = 50 }) {
+      const b = el('button', {
+        id: `tool-${id}`, class: 'icon-btn tool-btn', type: 'button', 'aria-label': label, title: label, html: icon,
+        on: { click: onClick },
+      });
+      b.style.order = String(order);
+      app.ui.toolRail.append(b);
+      return b;
+    },
+    /** Append a section to the telemetry panel. */
+    addTelemetrySection(node, order = 50) {
+      node.style.order = String(order);
+      app.ui.telemetryExtra.append(node);
+      return node;
+    },
+    /** Append a section to the settings sheet. */
+    addSettingsSection(node, order = 50) {
+      node.style.order = String(order);
+      app.ui.settingsExtra.append(node);
+      return node;
+    },
+  },
+
+  actions: {
+    selectGear(gear, source = 'ui') {
+      const before = sim.gear;
+      const res = gearbox.request(gear);
+      if (res.ok) {
+        if (gear !== 'N' && sim.gear !== before) audio.clunk();
+        if (res.clutchless) app.toast('Clutchless shift: revs matched', 'good');
+        if (source !== 'lever') shifter.show(sim.gear);
+      } else if (res.grind) {
+        audio.grind();
+        app.toast(res.reason, 'bad');
+        bus.emit('grind', { gear, reason: res.reason, mismatchRpm: res.mismatchRpm });
+        navigator.vibrate?.(60);
+        if (source !== 'lever') shifter.show(sim.gear);
+      }
+      return res;
+    },
+    shiftUp() {
+      return app.actions.handleSequential(gearbox.shiftUp());
+    },
+    shiftDown() {
+      return app.actions.handleSequential(gearbox.shiftDown());
+    },
+    handleSequential(res) {
+      if (res && !res.ok && res.reason) {
+        if (res.grind) {
+          audio.grind();
+          bus.emit('grind', { gear: res.gear, reason: res.reason });
+        }
+        app.toast(res.reason, res.grind ? 'bad' : 'warn');
+      }
+      shifter.show(sim.gear);
+      return res;
+    },
+    startEngine() {
+      audio.unlock();
+      if (sim.blown) {
+        app.actions.repair();
+        return;
+      }
+      if (sim.running) return;
+      if (!sim.startEngine()) app.toast('Press the clutch or select neutral to start', 'warn');
+    },
+    repair() {
+      sim.repair();
+      bus.emit('repair', {});
+      app.toast('Engine rebuilt', 'good');
+    },
+    toggleTelemetry: (force) => telemetry.toggle(force),
+    openSettings() {
+      settingsPanel.render(settings, profile, sim);
+      settingsPanel.open();
+    },
+    closeSettings: () => settingsPanel.close(),
+    setMuted(muted) {
+      audio.unlock();
+      audio.setMuted(muted);
+      const b = $('btn-sound');
+      b.setAttribute('aria-pressed', String(!muted));
+      b.setAttribute('aria-label', muted ? 'Sound off' : 'Sound on');
+    },
+    resetView: () => view.resetView(),
+    resetSession() {
+      stats.reset();
+      tracker.reset();
+      telemetry.lastListKey = '';
+      bus.emit('session-reset', {});
+    },
+  },
+};
+
+// ── Feature modules ─────────────────────────────────────────────────────────
+const hooks = [];
+for (const f of FEATURES) {
+  try {
+    const h = f.install(app) || {};
+    hooks.push({ id: f.id, ...h });
+  } catch (err) {
+    console.error(`[feature ${f.id}] install failed`, err);
   }
-  if (kind === 'mode' || kind === 'all') applyMode();
-  saveSettings(settings);
-  settingsPanel.render(settings, profile, sim);
-  renderProfileLabel();
 }
+function runHook(name, ...args) {
+  for (const h of hooks) {
+    if (!h[name]) continue;
+    try {
+      h[name](...args);
+    } catch (err) {
+      console.error(`[feature ${h.id}] ${name} failed`, err);
+    }
+  }
+}
+
+const hud = new Hud(app);
+app.hud = hud;
 
 function applyMode() {
   gearbox.setMode(settings.mode);
   const auto = settings.mode === 'auto';
-  pedals.clutch.setEnabled(!auto);
+  pedals.clutch.setEnabled(settings.mode === 'manual');
   shifter.setAuto(auto);
   shifter.show(sim.gear);
-  $('mode-tag').hidden = !auto;
+  $('mode-tag').hidden = settings.mode === 'manual';
+  $('mode-tag').textContent = auto ? 'AUTO' : settings.mode === 'sequential' ? 'SEQ' : '';
 }
 
 function renderProfileLabel() {
@@ -146,59 +284,54 @@ function renderProfileLabel() {
   $('profile-speed').textContent = settings.visualSpeed === 1 ? 'Real-time visuals' : `Visuals at ${vs ? vs.label : ''} speed`;
 }
 
+// Core reactions to simulator events.
+bus.on('stall', () => {
+  tracker.stall(sim.time);
+  app.toast('Stalled: too few revs for that clutch release', 'bad');
+  navigator.vibrate?.([40, 40, 40]);
+});
+bus.on('start', (e) => app.toast(e.bump ? 'Bump-started!' : 'Engine running', 'good'));
+
+// ── Buttons, keys and iOS plumbing ──────────────────────────────────────────
+$('btn-sound').addEventListener('click', () => app.actions.setMuted(!audio.muted));
+$('btn-telemetry').addEventListener('click', () => telemetry.toggle());
+$('btn-settings').addEventListener('click', () => app.actions.openSettings());
+$('btn-start').addEventListener('click', () => app.actions.startEngine());
+$('btn-view').addEventListener('click', () => view.resetView());
+$('btn-defaults').addEventListener('click', () => {
+  settings = { ...DEFAULT_SETTINGS, gearRatios: [...DEFAULT_SETTINGS.gearRatios] };
+  app.apply({}, 'all');
+  app.toast('Defaults restored');
+});
+$('btn-reset-session').addEventListener('click', () => app.actions.resetSession());
+for (const b of document.querySelectorAll('[data-close]')) {
+  b.addEventListener('click', () => (b.dataset.close === 'settings' ? settingsPanel.close() : telemetry.toggle(false)));
+}
+
 function toggle(key) {
-  if (key === 'm') setMuted(!audio.muted);
+  if (key === 'm') app.actions.setMuted(!audio.muted);
   else if (key === 't') telemetry.toggle();
-  else if (key === 'g') (settingsPanel.isOpen ? settingsPanel.close() : openSettings());
+  else if (key === 'g') (settingsPanel.isOpen ? settingsPanel.close() : app.actions.openSettings());
   else if (key === 'v') view.resetView();
   else if (key === 'escape') {
     settingsPanel.close();
     telemetry.toggle(false);
+    bus.emit('escape', {});
   }
-}
-
-function openSettings() {
-  settingsPanel.render(settings, profile, sim);
-  settingsPanel.open();
-}
-
-function setMuted(muted) {
-  audio.unlock();
-  audio.setMuted(muted);
-  const b = $('btn-sound');
-  b.setAttribute('aria-pressed', String(!muted));
-  b.setAttribute('aria-label', muted ? 'Sound off' : 'Sound on');
-}
-
-$('btn-sound').addEventListener('click', () => setMuted(!audio.muted));
-$('btn-telemetry').addEventListener('click', () => telemetry.toggle());
-$('btn-settings').addEventListener('click', openSettings);
-$('btn-start').addEventListener('click', startEngine);
-$('btn-view').addEventListener('click', () => view.resetView());
-$('btn-defaults').addEventListener('click', () => {
-  settings = { ...DEFAULT_SETTINGS, gearRatios: [...DEFAULT_SETTINGS.gearRatios] };
-  applySettings({}, 'all');
-  toast('Defaults restored');
-});
-$('btn-reset-session').addEventListener('click', () => {
-  stats.reset();
-  tracker.reset();
-  telemetry.lastListKey = '';
-});
-for (const b of document.querySelectorAll('[data-close]')) {
-  b.addEventListener('click', () => (b.dataset.close === 'settings' ? settingsPanel.close() : telemetry.toggle(false)));
 }
 
 bindKeyboard({
   gas: pedals.gas,
   clutch: pedals.clutch,
   brake: pedals.brake,
-  onGear: (g) => selectGear(g, 'key'),
-  onStart: startEngine,
+  onGear: (g) => app.actions.selectGear(g, 'key'),
+  onStart: () => app.actions.startEngine(),
   onToggle: toggle,
+  onShiftUp: () => app.actions.shiftUp(),
+  onShiftDown: () => app.actions.shiftDown(),
+  onKey: (key, e) => bus.emit('key', { key, event: e }),
 });
 
-// ── iOS / PWA plumbing ──────────────────────────────────────────────────────
 // Audio may only start inside a user gesture: unlock on the very first touch,
 // and again after iOS interrupts the session (calls, backgrounding).
 const unlockAudio = () => audio.unlock();
@@ -222,7 +355,7 @@ window.addEventListener('pointerdown', keepAwake, { once: true });
 
 // Block rubber-banding and pinch-zoom outside the scrollable panels.
 document.addEventListener('touchmove', (e) => {
-  if (!e.target.closest?.('.telemetry, .sheet')) e.preventDefault();
+  if (!e.target.closest?.('.telemetry, .sheet, .scrollable')) e.preventDefault();
 }, { passive: false });
 for (const type of ['gesturestart', 'gesturechange', 'dblclick']) document.addEventListener(type, (e) => e.preventDefault());
 
@@ -245,69 +378,47 @@ $('scene').addEventListener('pointerup', (e) => {
 
 // ── Layout ──────────────────────────────────────────────────────────────────
 function layout() {
-  const app = $('app');
-  const w = app.clientWidth;
-  const h = app.clientHeight;
+  const root = $('app');
+  const w = root.clientWidth;
+  const h = root.clientHeight;
   const top = document.querySelector('.tach').getBoundingClientRect().bottom;
   const bottomBar = document.querySelector('.hud-bottom').getBoundingClientRect();
   const bottom = Math.max(0, h - bottomBar.top);
   document.documentElement.style.setProperty('--controls-h', `${Math.round(bottom + 10)}px`);
+  document.documentElement.style.setProperty('--hud-top-h', `${Math.round(top)}px`);
   // In portrait the HUD bars span the width, so frame the engine between them.
   // In landscape they sit in the corners and the centre column stays clear.
   const landscape = w > h * 1.15;
   view.resize(w, h, landscape ? { top: top * 0.25, bottom: 0 } : { top, bottom: bottom * 0.75 });
   view.frameModel(!userMovedCamera);
+  bus.emit('layout', { width: w, height: h, landscape });
 }
+app.layout = layout;
 view.controls.addEventListener('start', () => (userMovedCamera = true));
 window.addEventListener('resize', layout);
 window.visualViewport?.addEventListener('resize', layout);
 window.addEventListener('orientationchange', () => setTimeout(layout, 250));
 
-// ── HUD ─────────────────────────────────────────────────────────────────────
-const hud = {
-  rpm: $('rpm'), fill: $('rpm-fill'), redline: $('rpm-redline'), gear: $('gear'), speed: $('speed'),
-  limiter: $('limiter'), traction: $('traction'), stall: $('stall'), stallHelp: $('stall-help'), start: $('btn-start'),
-};
-const shown = {};
-const setText = (el, key, value) => {
-  if (shown[key] !== value) {
-    shown[key] = value;
-    el.textContent = value;
+// ── Simulation tick (no rendering) ──────────────────────────────────────────
+let prevGear = sim.gear;
+function tick(dt, inputOverride) {
+  app.input = inputOverride
+    ? { gas: 0, clutch: 0, brake: 0, ...inputOverride }
+    : { gas: pedals.gas.value, clutch: pedals.clutch.value, brake: pedals.brake.value };
+  runHook('beforeStep', dt, app);
+  gearbox.update(dt, app.input);
+  sim.step(dt);
+  tracker.update(dt, sim);
+  stats.update(dt, sim);
+  for (const e of sim.drainEvents()) bus.emit(e.type, e);
+  if (sim.gear !== prevGear) {
+    bus.emit('gear', { from: prevGear, to: sim.gear });
+    prevGear = sim.gear;
   }
-};
-let spinTime = 0;
-let spinHold = 0;
-
-function updateHud(dt) {
-  const rpm = sim.rpm;
-  const scale = profile.redlineRpm * 1.06;
-  setText(hud.rpm, 'rpm', String(Math.round(rpm / 10) * 10));
-  hud.fill.style.width = `${Math.min(100, (rpm / scale) * 100).toFixed(1)}%`;
-  hud.redline.style.left = `${((profile.redlineRpm / scale) * 100).toFixed(1)}%`;
-  hud.fill.classList.toggle('is-red', rpm > profile.redlineRpm * 0.92);
-  const gearText = String(sim.gear);
-  setText(hud.gear, 'gear', gearText);
-  hud.gear.classList.toggle('is-reverse', sim.gear === 'R');
-  setText(hud.speed, 'speed', String(Math.round(sim.speedKmh)));
-  hud.limiter.hidden = !sim.fuelCut;
-  // Only flag sustained wheelspin, not the blip of a clutch catching.
-  spinTime = sim.wheelspin && sim.throttleEffective > 0.3 ? spinTime + dt : 0;
-  spinHold = spinTime > 0.2 ? 0.35 : Math.max(0, spinHold - dt);
-  hud.traction.hidden = spinHold <= 0;
-
-  const off = !sim.running && !sim.cranking;
-  hud.stall.hidden = !off;
-  if (off) {
-    const ready = sim.canCrank();
-    hud.start.disabled = !ready;
-    setText(hud.stallHelp, 'stallHelp', ready ? 'Ready. Tap START to crank it over.' : 'Press the clutch or select neutral, then start.');
-  }
+  runHook('afterStep', dt, app);
 }
 
-// ── Main loop ───────────────────────────────────────────────────────────────
-let crankDeg = 0;
-let inputDeg = 0;
-let outputDeg = 0;
+// ── Frame loop ──────────────────────────────────────────────────────────────
 let last = performance.now();
 let booted = false;
 
@@ -318,51 +429,59 @@ function frame(now) {
   const dt = Math.min(0.1, Math.max(0, frameMs / 1000));
   last = now;
 
-  const input = {
-    gas: pedals.gas.update(dt),
-    clutch: pedals.clutch.update(dt),
-    brake: pedals.brake.update(dt),
-  };
-  gearbox.update(dt, input);
-  sim.step(dt);
-  tracker.update(dt, sim);
-  stats.update(dt, sim);
+  for (const p of Object.values(pedals)) p.update(dt);
+  tick(dt);
 
-  for (const e of sim.drainEvents()) {
-    if (e.type === 'stall') {
-      tracker.stall(sim.time);
-      toast('Stalled: too few revs for that clutch release', 'bad');
-      navigator.vibrate?.([40, 40, 40]);
-    } else if (e.type === 'start') {
-      toast(e.bump ? 'Bump-started!' : 'Engine running', 'good');
-    }
-  }
-
-  if (gearbox.mode === 'auto' && shifter.pointer === null && shifter.zone !== sim.gear) shifter.show(sim.gear);
+  if (gearbox.mode !== 'manual' && shifter.pointer === null && shifter.zone !== sim.gear) shifter.show(sim.gear);
   shifter.update(dt);
 
   // Visual angles run slowed down so individual strokes stay readable.
-  const k = dt * RAD2DEG * settings.visualSpeed;
-  crankDeg = (crankDeg + sim.omega * k) % 2160;
-  inputDeg = (inputDeg + sim.inputOmega * k) % 3600;
-  outputDeg = (outputDeg + sim.outputOmega * k) % 3600;
-  view.update(dt, { crankDeg, inputDeg, outputDeg, sim, showFlashes: true });
+  const vs = app.viewState;
+  if (vs.scrubDeg !== null) {
+    vs.crankDeg = ((vs.scrubDeg % 2160) + 2160) % 2160;
+  } else if (!vs.frozen) {
+    const k = dt * RAD2DEG * settings.visualSpeed;
+    vs.crankDeg = (vs.crankDeg + sim.omega * k) % 2160;
+    vs.inputDeg = (vs.inputDeg + sim.inputOmega * k) % 3600;
+    vs.outputDeg = (vs.outputDeg + sim.outputOmega * k) % 3600;
+  }
+  view.update(dt, {
+    crankDeg: vs.crankDeg, inputDeg: vs.inputDeg, outputDeg: vs.outputDeg, sim, settings,
+    frozen: vs.frozen || vs.scrubDeg !== null, showFlashes: true,
+  });
+  runHook('beforeRender', dt, app);
   view.render();
   view.adaptQuality(frameMs);
 
   audio.update(sim, dt);
-  updateHud(dt);
+  hud.update(dt);
   telemetry.update(sim, stats, tracker);
+  runHook('frame', dt, app);
 
   if (!booted) {
     booted = true;
     window.__engineBooted = true;
     $('boot').hidden = true;
-    if (matchMedia('(pointer: coarse)').matches) toast('Tap anywhere to turn the sound on');
+    if (matchMedia('(pointer: coarse)').matches) app.toast('Tap anywhere to turn the sound on');
   }
 }
 
-applySettings({}, 'all');
+// ── Debug API (?debug): deterministic stepping for tests ─────────────────────
+if (debugMode) {
+  window.__app = app;
+  Object.assign(window, { sim, view, gearbox, audio });
+  app.debugApi = {
+    /** Run the simulation for `seconds` at a fixed step with fixed pedal input, without rendering. */
+    advance(seconds, input = {}) {
+      const n = Math.round(seconds / TICK);
+      for (let i = 0; i < n; i++) tick(TICK, input);
+      return { rpm: sim.rpm, kmh: sim.speedKmh, gear: sim.gear, running: sim.running };
+    },
+    tick,
+  };
+}
+
+app.apply({}, 'all');
 layout();
 requestAnimationFrame((t) => {
   last = t;
