@@ -1,0 +1,16 @@
+{
+  "name": "engine-sim",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Interactive 3D engine and transmission simulator for mobile browsers",
+  "type": "module",
+  "scripts": {
+    "dev": "npx serve -l 5173 .",
+    "test": "node --test test/*.test.mjs",
+    "build": "node tools/build.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.2",
+    "three": "0.186.1"
+  }
+}

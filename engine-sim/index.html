@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Firing Order</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+  <meta name="description" content="Interactive 3D engine and gearbox simulator: slider-crank kinematics, real firing orders, a manual H-pattern with clutch and stalls, and a procedural engine sound.">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="Firing Order">
+  <meta name="theme-color" content="#090b10">
+  <meta name="format-detection" content="telephone=no">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="public/icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="public/icon-180.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Saira+Semi+Condensed:wght@400;500;600;700;800&display=swap">
+  <link rel="stylesheet" href="styles.css">
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://cdn.jsdelivr.net/npm/three@0.186.1/build/three.module.js",
+        "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.186.1/examples/jsm/"
+      }
+    }
+  </script>
+</head>
+<body>
+  <div id="app">
+    <canvas id="scene" aria-label="3D engine view. Drag to orbit, pinch to zoom, double-tap to reset the view."></canvas>
+
+    <header class="hud-top">
+      <section class="tach" aria-label="Engine telemetry">
+        <div class="tach-row">
+          <output id="rpm" class="rpm-value" aria-live="off">800</output>
+          <span class="unit">RPM</span>
+          <span id="limiter" class="pill pill-red" hidden>LIMITER</span>
+        </div>
+        <div class="rpm-bar" aria-hidden="true">
+          <div id="rpm-fill" class="rpm-fill"></div>
+          <div id="rpm-redline" class="rpm-redline"></div>
+        </div>
+        <div class="tach-row tach-sub">
+          <output id="gear" class="gear-badge">N</output>
+          <span id="mode-tag" class="mode-tag" hidden>AUTO</span>
+          <span class="speed"><output id="speed">0</output> <span class="unit">km/h</span></span>
+          <span id="traction" class="pill pill-amber" hidden>WHEELSPIN</span>
+        </div>
+      </section>
+
+      <section class="hud-right">
+        <p class="profile">
+          <span id="profile-name">V8 Crossplane</span>
+          <span id="profile-order" class="profile-order">1-8-4-3-6-5-7-2</span>
+          <span id="profile-speed" class="profile-speed">Visuals at 1/25 speed</span>
+        </p>
+        <div class="tool-row">
+          <button id="btn-sound" class="icon-btn" type="button" aria-label="Sound on" aria-pressed="true" title="Sound (M)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path class="ico-on" d="M4 9h3l5-4v14l-5-4H4zM15.5 8.5a5 5 0 0 1 0 7M18 6a8.5 8.5 0 0 1 0 12"/><path class="ico-off" d="M4 9h3l5-4v14l-5-4H4zM16 9l5 6M21 9l-5 6"/></svg>
+          </button>
+          <button id="btn-telemetry" class="icon-btn" type="button" aria-label="Telemetry" aria-expanded="false" aria-controls="telemetry" title="Telemetry (T)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 20h18M5 16l4-5 4 3 6-8"/></svg>
+          </button>
+          <button id="btn-settings" class="icon-btn" type="button" aria-label="Engine and gearbox settings" aria-expanded="false" aria-controls="settings" title="Settings (G)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h10M18 7h2M4 17h4M12 17h8"/><circle cx="16" cy="7" r="2"/><circle cx="10" cy="17" r="2"/></svg>
+          </button>
+        </div>
+      </section>
+    </header>
+
+    <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+    <section id="stall" class="stall-card" hidden aria-live="assertive">
+      <p class="stall-title">Engine stalled</p>
+      <p id="stall-help" class="stall-help">Press the clutch or select neutral, then start.</p>
+      <button id="btn-start" class="start-btn" type="button">START</button>
+    </section>
+
+    <!-- Live telemetry: sits between the HUD bars so you can drive while it is open. -->
+    <section id="telemetry" class="panel telemetry" hidden aria-label="Telemetry">
+      <div class="panel-head">
+        <h2>Telemetry</h2>
+        <button id="btn-reset-session" class="text-btn" type="button">Reset session</button>
+        <button class="icon-btn small" type="button" data-close="telemetry" aria-label="Close telemetry">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+        </button>
+      </div>
+      <div class="tiles">
+        <div class="tile"><span class="tile-label">Peak rpm</span><output id="t-peak-rpm" class="tile-value">0</output></div>
+        <div class="tile"><span class="tile-label">Top speed</span><output id="t-top-speed" class="tile-value">0</output><span class="tile-unit">km/h</span></div>
+        <div class="tile"><span class="tile-label">0–100 km/h</span><output id="t-zero-100" class="tile-value">—</output><span class="tile-unit">s</span></div>
+        <div class="tile"><span class="tile-label">Distance</span><output id="t-distance" class="tile-value">0.00</output><span class="tile-unit">km</span></div>
+      </div>
+
+      <div class="chart-block">
+        <div class="chart-head">
+          <h3>Torque <span class="chart-unit">Nm</span></h3>
+          <p class="chart-readout"><span id="t-torque-now">0</span> Nm now · peak <span id="t-torque-peak">0</span> Nm @ <span id="t-torque-peak-rpm">0</span></p>
+        </div>
+        <canvas id="chart-torque" class="chart" height="120" aria-label="Wide-open-throttle torque curve with the current engine speed marked"></canvas>
+        <div class="chart-head">
+          <h3>Power <span class="chart-unit">hp</span></h3>
+          <p class="chart-readout"><span id="t-power-now">0</span> hp now · peak <span id="t-power-peak">0</span> hp @ <span id="t-power-peak-rpm">0</span></p>
+        </div>
+        <canvas id="chart-power" class="chart" height="120" aria-label="Wide-open-throttle power curve with the current engine speed marked"></canvas>
+        <div id="chart-tip" class="chart-tip" hidden></div>
+      </div>
+
+      <div class="shift-block">
+        <div class="chart-head">
+          <h3>Shift quality</h3>
+          <p class="chart-readout">avg <span id="t-shift-avg">—</span> · <span id="t-shift-count">0</span> shifts · <span id="t-grinds">0</span> grinds · <span id="t-stalls">0</span> stalls</p>
+        </div>
+        <ol id="shift-list" class="shift-list"></ol>
+        <p id="shift-empty" class="empty">No shifts yet. Each shift is scored on rev match at the bite point, heat put into the clutch and time between gears.</p>
+      </div>
+    </section>
+
+    <footer class="hud-bottom">
+      <div class="shifter-wrap">
+        <div id="shifter" class="shifter" role="group" aria-label="H-pattern gear lever. Drag the knob through the gate.">
+          <svg class="gate" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true">
+            <path d="M18 14V86M50 14V86M82 14V86M18 50H82"/>
+          </svg>
+          <span class="gate-label" style="left:18%;top:2%">1</span>
+          <span class="gate-label" style="left:50%;top:2%">3</span>
+          <span class="gate-label" style="left:82%;top:2%">5</span>
+          <span class="gate-label" style="left:18%;top:98%">2</span>
+          <span class="gate-label" style="left:50%;top:98%">4</span>
+          <span class="gate-label" style="left:82%;top:98%">R</span>
+          <div id="knob" class="knob" aria-hidden="true"></div>
+        </div>
+        <p class="hint">Push and pull the lever</p>
+      </div>
+      <div class="pedal-wrap">
+        <div class="pedals">
+          <button id="pedal-clutch" class="pedal pedal-clutch" type="button" aria-label="Clutch pedal"><span>CLUTCH</span></button>
+          <button id="pedal-brake" class="pedal pedal-brake" type="button" aria-label="Brake pedal"><span>BRAKE</span></button>
+          <button id="pedal-gas" class="pedal pedal-gas" type="button" aria-label="Gas pedal"><span>GAS</span></button>
+        </div>
+        <p class="hint hint-keys">Space gas · Shift clutch · B brake · 1–5 R N</p>
+        <p class="hint hint-touch">Slide up on a pedal to feather it</p>
+      </div>
+    </footer>
+
+    <!-- Settings sheet. -->
+    <div id="settings" class="sheet-backdrop" hidden>
+      <section class="panel sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+        <div class="panel-head">
+          <h2 id="settings-title">Engine &amp; gearbox</h2>
+          <button class="icon-btn small" type="button" data-close="settings" aria-label="Close settings">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+        </div>
+
+        <fieldset class="field">
+          <legend>Engine</legend>
+          <div id="opt-preset" class="chips" role="radiogroup" aria-label="Engine type"></div>
+          <p id="opt-preset-note" class="field-note"></p>
+        </fieldset>
+
+        <fieldset class="field">
+          <legend>Cylinders</legend>
+          <div id="opt-cylinders" class="chips" role="radiogroup" aria-label="Cylinder count"></div>
+        </fieldset>
+
+        <div class="field-grid">
+          <label class="field range-field" for="opt-idle">
+            <span class="field-label">Idle <output id="opt-idle-out">800</output> rpm</span>
+            <input id="opt-idle" type="range" min="500" max="1300" step="50" value="800">
+          </label>
+          <label class="field range-field" for="opt-redline">
+            <span class="field-label">Redline <output id="opt-redline-out">7000</output> rpm</span>
+            <input id="opt-redline" type="range" min="4500" max="9500" step="100" value="7000">
+          </label>
+          <label class="field range-field" for="opt-bore">
+            <span class="field-label">Bore / stroke <output id="opt-bore-out">1.00</output></span>
+            <input id="opt-bore" type="range" min="0.7" max="1.4" step="0.01" value="1">
+            <span id="opt-bore-note" class="field-note"></span>
+          </label>
+          <fieldset class="field">
+            <legend>Animation speed</legend>
+            <div id="opt-visual" class="chips" role="radiogroup" aria-label="Animation speed"></div>
+          </fieldset>
+        </div>
+
+        <fieldset class="field">
+          <legend>Transmission</legend>
+          <div id="opt-mode" class="chips" role="radiogroup" aria-label="Transmission mode">
+            <button type="button" class="chip" role="radio" data-value="manual">Manual</button>
+            <button type="button" class="chip" role="radio" data-value="auto">Automatic</button>
+          </div>
+          <p class="field-note">Automatic shifts up near redline and down below 2000 rpm; the clutch is automated.</p>
+        </fieldset>
+
+        <fieldset class="field">
+          <legend>Gear ratios</legend>
+          <div id="opt-ratio-presets" class="chips" aria-label="Ratio presets"></div>
+          <div class="ratio-grid">
+            <label for="opt-r1">1st<input id="opt-r1" data-gear="0" type="number" inputmode="decimal" step="0.01" min="0.4" max="6"></label>
+            <label for="opt-r2">2nd<input id="opt-r2" data-gear="1" type="number" inputmode="decimal" step="0.01" min="0.4" max="6"></label>
+            <label for="opt-r3">3rd<input id="opt-r3" data-gear="2" type="number" inputmode="decimal" step="0.01" min="0.4" max="6"></label>
+            <label for="opt-r4">4th<input id="opt-r4" data-gear="3" type="number" inputmode="decimal" step="0.01" min="0.4" max="6"></label>
+            <label for="opt-r5">5th<input id="opt-r5" data-gear="4" type="number" inputmode="decimal" step="0.01" min="0.4" max="6"></label>
+            <label for="opt-rr">Rev<input id="opt-rr" data-gear="R" type="number" inputmode="decimal" step="0.01" min="0.4" max="6"></label>
+            <label for="opt-fd">Final<input id="opt-fd" type="number" inputmode="decimal" step="0.01" min="1.5" max="6"></label>
+            <label for="opt-tire">Tyre ⌀ cm<input id="opt-tire" type="number" inputmode="decimal" step="0.5" min="40" max="100"></label>
+          </div>
+          <p id="opt-gearing-note" class="field-note"></p>
+        </fieldset>
+
+        <div class="sheet-actions">
+          <button id="btn-defaults" class="text-btn" type="button">Restore defaults</button>
+          <button id="btn-view" class="text-btn" type="button">Reset camera</button>
+          <button class="primary-btn" type="button" data-close="settings">Done</button>
+        </div>
+      </section>
+    </div>
+
+    <div id="boot" class="boot" role="status">Loading the engine…</div>
+  </div>
+
+  <script>
+    // Explain a failed boot (offline CDN, no WebGL) instead of spinning forever.
+    (function () {
+      function fail(msg) {
+        if (window.__engineBooted) return;
+        var b = document.getElementById('boot');
+        b.textContent = msg;
+        b.className = 'boot is-error';
+      }
+      window.addEventListener('error', function (e) {
+        fail('The simulator could not start: ' + (e.message || 'unknown error') + '. Reload to try again.');
+      });
+      setTimeout(function () {
+        fail('The 3D engine is taking too long to load. Check your connection and reload.');
+      }, 20000);
+    })();
+  </script>
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>
