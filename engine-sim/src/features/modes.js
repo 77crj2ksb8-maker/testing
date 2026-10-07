@@ -1097,7 +1097,7 @@ export default {
         setText(dynoUi.run, dyno.runs.length ? 'Run again' : 'Run pull');
         setText(dynoUi.sub, `${DYNO_GEAR}th gear · rollers ${fmtInt(dyno.rollerMass)} kg`);
         const turbo = app.profile.induction?.kind === 'turbo' || app.profile.induction?.kind === 'twin-turbo';
-        setText(dynoUi.note, `Dashed: the engine's rated curve. The rollers read what reaches the crank after friction${turbo ? ', and a turbo reads low until it spools' : ''}.`);
+        setText(dynoUi.note, `Rated is the engine's spec curve. The rollers read what reaches the crank after friction, so measured sits a little under it${turbo ? ', and a turbo reads low until it spools' : ''}.`);
         renderRuns();
         const latest = currentRuns()[0] ?? null;
         setText(dynoUi.hp.value, latest ? fmtInt(latest.peakHp) : '—');
