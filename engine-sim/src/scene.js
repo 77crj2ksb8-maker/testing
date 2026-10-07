@@ -538,11 +538,7 @@ export class EngineView {
   frameInfo() {
     const sphere = this.sphereAt(this.explodeT, new THREE.Sphere());
     const center = this.frameCenter(sphere, v3());
-    const vFov = this.camera.fov * DEG;
-    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
-    const usable = Math.max(0.35, 1 - (this.insets.top + this.insets.bottom) / Math.max(1, this.height));
-    const fov = Math.min(vFov * usable, hFov);
-    const dist = (sphere.radius * 0.74) / Math.sin(fov / 2);
+    const dist = (sphere.radius * 0.74) / Math.sin(this.usableFov() / 2);
     return { sphere, center, dist };
   }
 
@@ -593,10 +589,18 @@ export class EngineView {
   // Distance that fits the whole assembly across the narrower screen axis.
   fitAll() {
     const { sphere } = this.frameInfo();
+    return (sphere.radius * 0.92) / Math.sin(this.usableFov() / 2);
+  }
+
+  // Field of view (radians) across the narrower clear axis between the HUD
+  // insets: top/bottom always, left/right when the layout passes them.
+  usableFov() {
     const vFov = this.camera.fov * DEG;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
-    const usable = Math.max(0.35, 1 - (this.insets.top + this.insets.bottom) / Math.max(1, this.height));
-    return (sphere.radius * 0.92) / Math.sin(Math.min(vFov * usable, hFov) / 2);
+    const { top = 0, bottom = 0, left = 0, right = 0 } = this.insets;
+    const v = Math.max(0.35, 1 - (top + bottom) / Math.max(1, this.height));
+    const h = Math.max(0.35, 1 - (left + right) / Math.max(1, this.width));
+    return Math.min(vFov * v, hFov * h);
   }
 
   frameModel(resetView) {
@@ -624,8 +628,9 @@ export class EngineView {
     this.renderer.setSize(width, height, false);
     this.camera.aspect = width / height;
     // Shift the projection centre so the model sits in the gap between the HUD bars.
-    const offsetY = (insets.bottom - insets.top) / 2;
-    this.camera.setViewOffset(width, height, 0, offsetY, width, height);
+    const offsetX = ((insets.right ?? 0) - (insets.left ?? 0)) / 2;
+    const offsetY = ((insets.bottom ?? 0) - (insets.top ?? 0)) / 2;
+    this.camera.setViewOffset(width, height, offsetX, offsetY, width, height);
     this.camera.updateProjectionMatrix();
     this.post.setSize(width, height);
     this.effects.setScale((height * this.renderer.getPixelRatio()) / (2 * Math.tan((this.camera.fov * DEG) / 2)));
