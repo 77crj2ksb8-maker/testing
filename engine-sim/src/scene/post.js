@@ -100,6 +100,14 @@ export class PostFX {
     this.height = height;
     if (!this.composer) return;
     const pr = this.renderer.getPixelRatio();
+    // MSAA only where pixels are big enough for jaggies to show.
+    const samples = pr >= 1.75 ? 0 : 4;
+    for (const t of [this.composer.renderTarget1, this.composer.renderTarget2]) {
+      if (t.samples !== samples) {
+        t.samples = samples;
+        t.dispose();
+      }
+    }
     this.composer.setPixelRatio(pr);
     this.composer.setSize(width, height);
     this.bloomComposer.setPixelRatio(pr * BLOOM_SCALE);

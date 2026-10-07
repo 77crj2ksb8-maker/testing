@@ -55,6 +55,8 @@ export function makeMaterials() {
     alloy: new THREE.MeshStandardMaterial({ color: 0xb9c0c9, metalness: 0.9, roughness: 0.32 }),
     blackAlloy: new THREE.MeshStandardMaterial({ color: 0x2a2f37, metalness: 0.7, roughness: 0.38 }),
     belt: new THREE.MeshStandardMaterial({ color: 0x15181d, metalness: 0.1, roughness: 0.8 }),
+    // Charge piping: dark anodised so it frames the engine instead of competing with it.
+    charge: new THREE.MeshStandardMaterial({ color: 0x3c4552, metalness: 0.75, roughness: 0.32 }),
     // Exhaust parts glow with EGT through their emissive colour (set per frame).
     header: new THREE.MeshStandardMaterial({ color: 0x7d838c, metalness: 0.9, roughness: 0.34, emissive: 0x000000 }),
     pipe: new THREE.MeshStandardMaterial({ color: 0x6d737c, metalness: 0.9, roughness: 0.4, emissive: 0x000000 }),

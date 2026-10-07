@@ -7,7 +7,13 @@
 const DRAW_CALL_BUDGET = 350;
 
 export default async function visuals({ page, evaluate, advance, shot, expect, log }) {
-  const wait = (ms) => page.waitForTimeout(ms);
+  // Frames are slow in software rendering: wait on state and on frames, not on time.
+  const until = (fn, arg, timeout = 30000) => page.waitForFunction(fn, arg, { timeout }).then(() => true, () => false);
+  const frames = (n) => evaluate((k) => new Promise((resolve) => {
+    let left = k;
+    const step = () => (--left <= 0 ? resolve(true) : window.requestAnimationFrame(step));
+    window.requestAnimationFrame(step);
+  }), n);
   // Jump the camera to a preset without the fly-in (the software renderer runs at a few fps).
   const snapTo = (id) => evaluate((name) => {
     const v = window.__app.view;
@@ -21,6 +27,10 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
     v.renderer.render(v.scene, v.camera); // direct pass: count scene draws, not post passes
     return v.renderer.info.render.calls;
   });
+
+  // The software renderer manages a few fps without bloom and far less with it,
+  // so the timing checks run on 'low'; bloom gets its own shots at the end.
+  await apply({ quality: 'low' }, 'view');
 
   // ── Default V8 ─────────────────────────────────────────────────────────────
   await advance(1.5, {});
@@ -37,7 +47,7 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   // Camera preset flies there with an eased move.
   const label = await evaluate(() => window.__app.view.setCameraPreset('side'));
   expect(label === 'Side', `setCameraPreset returns a label (got ${label})`);
-  await wait(4000);
+  await page.waitForFunction(() => !window.__app.view.rig.flight, null, { timeout: 20000 });
   const flown = await evaluate(() => {
     const v = window.__app.view;
     const pose = v.presetPose('side');
@@ -46,12 +56,15 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   expect(!flown.flying && flown.d < 0.05, `fly-to lands on the preset (off by ${flown.d.toFixed(3)})`);
 
   // Cinematic orbit moves the camera; a user drag stops it.
-  const orbit = await evaluate(async () => {
+  await evaluate(() => {
     const v = window.__app.view;
     v.setCinematic(true);
-    const a = v.camera.position.clone();
-    await new Promise((r) => setTimeout(r, 1500));
-    const moved = v.camera.position.distanceTo(a);
+    window.__camStart = v.camera.position.clone();
+  });
+  await frames(3);
+  const orbit = await evaluate(() => {
+    const v = window.__app.view;
+    const moved = v.camera.position.distanceTo(window.__camStart);
     v.controls.dispatchEvent({ type: 'start' });
     return { moved, on: v.cinematic };
   });
@@ -60,7 +73,7 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   // ── Valvetrain close-up, frozen with stroke labels ──────────────────────────
   await snapTo('valvetrain');
   await evaluate(() => { window.__app.viewState.scrubDeg = 100; });
-  await wait(1200);
+  await frames(2);
   const vt = await evaluate(() => {
     const v = window.__app.view;
     const chips = [...document.querySelectorAll('.stroke-chip')];
@@ -78,8 +91,7 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   expect(Math.abs(vt.camRot - (-vt.crank / 2) * Math.PI / 180) < 1e-6, 'cams turn at half crank speed');
   await shot('vis-valvetrain-labels');
   await evaluate(() => { window.__app.viewState.scrubDeg = null; });
-  await wait(600);
-  const hidden = await evaluate(() => document.querySelector('.stroke-labels').hidden);
+  const hidden = await until(() => document.querySelector('.stroke-labels').hidden);
   expect(hidden, 'labels hide when the animation runs again');
 
   // ── X-ray and cutaway ───────────────────────────────────────────────────────
@@ -100,18 +112,23 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
 
   // ── Exploded view: animated, and kinematics keep running ────────────────────
   await evaluate(() => window.__app.view.setExplode(1));
-  await wait(1500);
+  await frames(2);
   const mid = await evaluate(() => window.__app.view.explodeT);
-  expect(mid > 0.05, `explode animates (t=${mid.toFixed(2)} after 1.5 s)`);
-  await wait(5000);
-  const ex = await evaluate(async () => {
+  expect(mid > 0.02 && mid < 1, `explode animates (t=${mid.toFixed(2)} two frames in)`);
+  await until(() => window.__app.view.explodeT === 1);
+  await advance(0.3, { gas: 0.4 });
+  await evaluate(() => {
     const v = window.__app.view;
     const m = new v.m4.constructor();
     v.pistons.getMatrixAt(0, m);
-    const y0 = m.elements[13];
-    await new Promise((r) => setTimeout(r, 1200));
+    window.__pistonY = m.elements[13];
+  });
+  await frames(3);
+  const ex = await evaluate(() => {
+    const v = window.__app.view;
+    const m = new v.m4.constructor();
     v.pistons.getMatrixAt(0, m);
-    return { t: v.explodeT, moved: Math.abs(m.elements[13] - y0) };
+    return { t: v.explodeT, moved: Math.abs(m.elements[13] - window.__pistonY) };
   });
   expect(ex.t > 0.97, `explode reaches fully exploded (t=${ex.t.toFixed(2)})`);
   expect(ex.moved > 1e-4, 'pistons keep moving in the exploded view');
@@ -126,11 +143,11 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   // ── Induction kits ──────────────────────────────────────────────────────────
   await apply({ induction: 'turbo' });
   await advance(1.5, { gas: 1 });
-  const spin = await evaluate(async () => {
+  await evaluate(() => { window.__wheel = window.__app.view.inductionHw.turbos[0].wheel.rotation.z; });
+  await frames(2);
+  const spin = await evaluate(() => {
     const t = window.__app.view.inductionHw.turbos[0];
-    const a = t.wheel.rotation.z;
-    await new Promise((r) => setTimeout(r, 900));
-    return { n: window.__app.view.inductionHw.turbos.length, moved: Math.abs(t.wheel.rotation.z - a) };
+    return { n: window.__app.view.inductionHw.turbos.length, moved: Math.abs(t.wheel.rotation.z - window.__wheel) };
   });
   expect(spin.n === 1 && spin.moved > 0, `single turbo with a spinning compressor wheel (Δ${spin.moved.toFixed(3)} rad)`);
   await shot('vis-turbo');
@@ -156,7 +173,7 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
     v.burst('bov', { strength: 1 });
     v.blowUp();
   });
-  await wait(700);
+  await frames(2);
   const v12 = await calls();
   log(`V12 twin-turbo, all effects: ${v12} draw calls`);
   expect(v12 > 0 && v12 < DRAW_CALL_BUDGET, `V12 with everything on stays under ${DRAW_CALL_BUDGET} draw calls (${v12})`);
@@ -188,9 +205,10 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
     const profile = { ...base, id: 'boxer-test', name: 'Boxer test', banks: 2, vAngle: 180, firingOrder: order, cylinders };
     delete profile.layout;
     app.view.setProfile(profile, app.drive, { ...app.settings, induction: 'turbo' });
-    app.view.setCameraPreset('front');
-    await new Promise((r) => setTimeout(r, 3500));
     const v = app.view;
+    v.rig.active = 'front';
+    const p = v.presetPose('front');
+    v.rig.flyTo(p.target, p.position, true);
     return { layout: v.layout, banks: v.banks.length, valves: v.valvetrain.objects.length };
   });
   expect(boxer.layout === 'boxer' && boxer.banks === 2, `synthetic boxer is laid out flat (${boxer.layout}, ${boxer.banks} banks)`);
@@ -219,7 +237,7 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   // ── Blow-up sequence ────────────────────────────────────────────────────────
   await snapTo('hero');
   await evaluate(() => window.__app.view.blowUp());
-  await wait(1600);
+  await until(() => window.__app.view.blown?.t > 1.2);
   const bl = await evaluate(() => {
     const v = window.__app.view;
     return { rod: v.thrown.visible, smoke: v.effects.smoke.alive, y: v.thrown.position.y };
@@ -230,9 +248,16 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   const back = await evaluate(() => ({ rod: window.__app.view.thrown.visible, hidden: window.__app.view.hiddenRod }));
   expect(!back.rod && back.hidden === -1, 'restore puts the engine back together');
 
-  // ── Quality policy hooks ────────────────────────────────────────────────────
+  // ── Bloom (quality high) ────────────────────────────────────────────────────
   await apply({ quality: 'high' }, 'view');
   const hi = await evaluate(() => window.__app.view.bloomActive);
+  await evaluate(() => { window.__app.viewState.scrubDeg = 30; });
+  await advance(0.5, { gas: 0.5 });
+  await frames(2);
+  await evaluate(() => window.__app.view.burst('flame', { strength: 1 }));
+  await frames(1);
+  await shot('vis-bloom');
+  await evaluate(() => { window.__app.viewState.scrubDeg = null; });
   await apply({ quality: 'low' }, 'view');
   const lo = await evaluate(() => window.__app.view.bloomActive);
   expect(hi === true && lo === false, 'bloom on for high, off for low');

@@ -882,8 +882,15 @@ export class EngineView {
     if (this.explodeT !== this.explodeTarget) {
       const d = this.explodeTarget - this.explodeT;
       const step = Math.sign(d) * Math.max(Math.abs(d) * (1 - Math.exp(-dt * 4.5)), dt * 0.05);
+      const before = this.explodeT;
       this.explodeT = Math.abs(step) >= Math.abs(d) ? this.explodeTarget : this.explodeT + step;
       this.applyExplode(this.explodeT);
+      // Dolly out as the parts spread so the exploded engine stays in frame.
+      if (!this.rig.flight) {
+        const k = (1 + 0.45 * this.explodeT) / (1 + 0.45 * before);
+        this.tmp.subVectors(this.camera.position, this.controls.target).multiplyScalar(k);
+        this.camera.position.copy(this.controls.target).add(this.tmp);
+      }
     }
 
     // Piston cranks are drawn turning −θ about +Z; the Wankel's eccentric shaft
@@ -1135,7 +1142,7 @@ export class EngineView {
         const count = Math.floor(this.smokeDebt);
         this.smokeDebt -= count;
         const at = this.breach.localToWorld(this.tmp.set(0, 0, 0.05));
-        this.effects.smokeBurst(at, this.tmp2.copy(this.geom.breachNormal).multiplyScalar(0.6).add(v3(0, 1, 0)), count, 1.6, 0.9 * B, 0.32, 0.6, 3.2);
+        this.effects.smokeBurst(at, this.tmp2.copy(this.geom.breachNormal).multiplyScalar(0.6).add(v3(0, 1, 0)), count, 1.6, 1.5 * B, 0.2, 0.5, 3.4);
       }
       this.breachGlow.material.opacity = 0.25 + 0.75 * Math.exp(-bl.t / 1.4) * (0.8 + 0.2 * Math.sin(this.time * 23));
     } else if ((sim.damage ?? 0) > 0.4 && sim.running) {
@@ -1180,7 +1187,7 @@ export class EngineView {
     const solid = d.cutaway && !d.xray;
     this.setHousing(M.glass, solid ? { color: 0x4a5463, opacity: 1, metalness: 0.55, roughness: 0.42 } : this.housingLook.glass, d.xray ? 0.05 : null);
     this.setHousing(M.glassDark, solid ? { color: 0x2c333e, opacity: 1, metalness: 0.5, roughness: 0.4 } : this.housingLook.glassDark, d.xray ? 0.07 : null);
-    M.edge.color.set(d.xray ? 0x7fd8ff : solid ? 0xc6d4e8 : 0xa9bedc);
+    M.edge.color.set(this.blown ? 0xff6a3a : d.xray ? 0x7fd8ff : solid ? 0xc6d4e8 : 0xa9bedc);
     M.edge.opacity = d.xray ? 0.5 : solid ? 0.5 : 0.3;
     for (const mat of [M.glass, M.glassDark, M.edge]) {
       const planes = d.cutaway ? this.cutPlanes : null;
@@ -1267,7 +1274,7 @@ export class EngineView {
       this.exhaust.flame(s);
       for (const tip of this.exhaust.tips) {
         const at = this.engine.localToWorld(this.tmp.copy(tip));
-        this.effects.sparkBurst(at, this.tmp2.set(0, 0.15, -1), Math.round(4 + 10 * s), 6 + 6 * s, 0.6, 0.06 * B);
+        this.effects.sparkBurst(at, this.tmp2.set(0, 0.15, -1), Math.round(4 + 10 * s), 6 + 6 * s, 0.6, 0.1 * B);
       }
     } else if (kind === 'bov') {
       const at = this.inductionHw.group.localToWorld(this.tmp.copy(this.inductionHw.bovPoint));
@@ -1335,8 +1342,8 @@ export class EngineView {
       return;
     }
     const world = this.engine.localToWorld(this.tmp.set(at.x, at.y, z));
-    this.effects.sparkBurst(world, this.tmp2.copy(n).add(v3(0, 0.5, 0.1)).normalize(), 150, 11, 1.2, 0.07 * B);
-    this.effects.smokeBurst(world, this.tmp2.copy(n).add(v3(0, 0.8, 0)), 46, 2.6, 1.1 * B, 0.28, 0.7, 3.4);
+    this.effects.sparkBurst(world, this.tmp2.copy(n).add(v3(0, 0.5, 0.1)).normalize(), 160, 12, 1.2, 0.13 * B);
+    this.effects.smokeBurst(world, this.tmp2.copy(n).add(v3(0, 0.8, 0)), 44, 2.8, 1.7 * B, 0.18, 0.6, 3.6);
     this.fxLight.position.copy(world).addScaledVector(n, 0.6);
     this.fxLightLevel = 2.2;
     this.M.edge.color.set(0xff6a3a);

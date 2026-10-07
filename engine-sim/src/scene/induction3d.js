@@ -193,19 +193,24 @@ export class Induction {
     const pipes = [];
     outlets.forEach((o, i) => {
       const s = count === 2 ? (i === 0 ? Math.sign(o.x) || 1 : -(Math.sign(outlets[0].x) || 1)) : Math.sign(o.x) || 1;
-      const inlet = v3(s * (icW / 2 + 0.14 * B), icY + icH * 0.25, icZ - 0.1 * B);
+      const inlet = v3(s * (icW / 2 + 0.14 * B), icY + icH * 0.2, icZ - 0.16 * B);
+      // Up off the compressor, forward along the block, down into the intercooler tank.
       pipes.push(pipeGeometry([
-        o, v3(o.x, o.y + 0.25 * B, o.z + 0.3 * B), v3(o.x * 0.85 + inlet.x * 0.15, o.y + 0.1 * B, icZ - 0.8 * B),
-        v3(inlet.x, inlet.y + 0.3 * B, icZ - 0.3 * B), inlet,
-      ], 0.12 * B, 48, 10));
+        o, v3(o.x, o.y + 0.3 * B, o.z + 0.25 * B), v3(o.x, o.y + 0.3 * B, icZ - 0.9 * B),
+        v3(inlet.x, inlet.y + 0.45 * B, icZ - 0.45 * B), inlet,
+      ], 0.12 * B, 56, 10));
     });
-    // Intercooler outlet up to the throttle body.
-    const outSide = count === 2 ? -(Math.sign(outlets[0].x) || 1) : -(Math.sign(outlets[0].x) || 1);
-    const icOut = v3(outSide * (icW / 2 + 0.14 * B), icY - icH * 0.25, icZ + 0.12 * B);
+    // Intercooler outlet straight up the front, then across into the throttle body.
+    const outSide = -(Math.sign(outlets[0].x) || 1);
+    const xo = outSide * (icW / 2 + 0.14 * B);
+    const icOut = v3(xo, icY + icH * 0.2, icZ + 0.16 * B);
     const tb = this.throttleBody;
-    pipes.push(pipeGeometry([icOut, v3(icOut.x, icOut.y, icZ + 0.4 * B), v3(icOut.x * 0.6, tb.y, icZ + 0.3 * B), v3(tb.x, tb.y, tb.z + 0.35 * B), tb], 0.13 * B, 48, 10));
-    this.group.add(new THREE.Mesh(merge(pipes), M.alloy));
-    this.bovPoint = v3(icOut.x * 0.6, tb.y + 0.2 * B, icZ + 0.3 * B);
+    pipes.push(pipeGeometry([
+      icOut, v3(xo, icY + icH * 0.5 + 0.3 * B, icZ + 0.25 * B), v3(xo, tb.y - 0.6 * B, icZ + 0.2 * B),
+      v3(xo * 0.45, tb.y, Math.max(icZ, tb.z + 0.6 * B)), v3(tb.x, tb.y, tb.z + 0.3 * B), tb,
+    ], 0.13 * B, 72, 10));
+    this.group.add(new THREE.Mesh(merge(pipes), M.charge));
+    this.bovPoint = v3(xo * 0.45, tb.y + 0.25 * B, Math.max(icZ, tb.z + 0.6 * B));
   }
 
   /** dt seconds; crankDeg for belt-driven parts; turboRpm drives the wheels at visual speed. */
