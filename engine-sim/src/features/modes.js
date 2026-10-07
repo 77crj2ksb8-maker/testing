@@ -31,6 +31,7 @@ const PULL_MAX_S = 40;
 const RUNS_KEPT = 3;
 const PV_RECOMPUTE_S = 0.12;
 const TOAST_GAP_S = 2.6;
+const SPEED_ACHIEVEMENTS = { 'speed-100': 100, 'speed-200': 200, 'speed-300': 300 };
 
 // One formatter for every readout (toLocaleString builds a new one per call).
 const NUM = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
@@ -777,7 +778,7 @@ export default {
       const root = el('section', { class: 'mo-section', 'aria-label': 'Achievements' },
         el('div', { class: 'chart-head' }, el('h3', { text: 'Achievements' }), count),
         el('ul', { class: 'mo-ach-list' }, items.map((i) => i.li)));
-      return { root, count, items, dirty: true, layouts: -1 };
+      return { root, count, items, dirty: true, layouts: -1, units: null };
     }
 
     // ── Drag flow ──────────────────────────────────────────────────────────
@@ -959,6 +960,8 @@ export default {
       const s = dyno.snapshot;
       if (s) {
         sim.distance = s.distance;
+        // A session reset on the rollers re-based the trip on roller metres.
+        if (app.stats.startDistance != null) app.stats.startDistance = Math.min(app.stats.startDistance, s.distance);
         app.stats.topSpeedKmh = s.topSpeedKmh;
         app.stats.bestZeroToHundred = s.bestZeroToHundred;
         app.stats.lastZeroToHundred = s.lastZeroToHundred;
@@ -1377,7 +1380,7 @@ export default {
       L.begin(ctx);
       const xTicks = [];
       for (let v = 0; v <= xTop + 1e-6; v += xStep) xTicks.push({ v, label: String(Math.round(v)) });
-      L.axes(ctx, xTicks, [0.2, 0.5, 1, 2, 5, 10, 20, 50, 100, 200].filter((v) => v <= yMax * 1.3), (v) => (v < 1 ? String(v).replace('0.', '.') : String(v)));
+      L.axes(ctx, xTicks, [0.2, 1, 5, 20, 100].filter((v) => v <= yMax * 1.3), (v) => (v < 1 ? String(v).replace('0.', '.') : String(v)));
       ctx.beginPath();
       for (let i = 0; i < PV_POINTS; i++) {
         const x = L.x(c.v[i] * 1e6);
@@ -1418,17 +1421,22 @@ export default {
 
     // ── Achievements UI ────────────────────────────────────────────────────
     function renderAchievements() {
-      if (achUi.layouts !== achievements.layouts.length) achUi.dirty = true;
+      if (achUi.layouts !== achievements.layouts.length || achUi.units !== app.settings.units) achUi.dirty = true;
       if (!achUi.dirty) return;
       achUi.dirty = false;
       achUi.layouts = achievements.layouts.length;
+      achUi.units = app.settings.units;
       setText(achUi.count, `${achievements.count} / ${achievements.total}`);
       for (const item of achUi.items) {
         const on = achievements.has(item.id);
         setClass(item.li, 'is-on', on);
         item.li.setAttribute('aria-label', `${on ? 'Unlocked' : 'Locked'}: ${item.base}`);
-        // The collector shows what is still missing.
-        if (item.id === 'all-layouts') {
+        // Speeds in the user's units; the collector shows what is still missing.
+        const kmh = SPEED_ACHIEVEMENTS[item.id];
+        if (kmh) {
+          const mph = Math.round(kmh * KMH_TO_MPH);
+          setText(item.detail, app.settings.units === 'mph' ? `Reach ${mph} mph (${kmh} km/h).` : `Reach ${kmh} km/h (${mph} mph).`);
+        } else if (item.id === 'all-layouts') {
           const missing = achievements.missingLayouts();
           setText(item.detail, on || missing.length === 5 ? item.base : `${item.base} Still to drive: ${missing.join(', ')}.`);
         }
@@ -1470,6 +1478,13 @@ export default {
     });
     bus.on('session-reset', () => {
       lastRecord = null;
+      const snap = dyno.snapshot;
+      if (snap) {
+        // Reset while on the rollers: the road figures restored on exit start fresh too.
+        snap.topSpeedKmh = 0;
+        snap.bestZeroToHundred = null;
+        snap.lastZeroToHundred = null;
+      }
     });
 
     // Gear changes belong to the dyno while the car is on the rollers.
