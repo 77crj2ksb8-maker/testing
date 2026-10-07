@@ -53,12 +53,13 @@ export class StrokeLabels {
   /** One chip per cylinder (or rotor), labelled with its number. */
   setCount(numbers) {
     this.layer.replaceChildren();
+    this.widths = new Map(); // chip width per label text, measured once
     this.chips = numbers.map((num) => {
       const dot = el('i');
       const word = el('span');
       const node = el('div', { class: 'stroke-chip' }, el('b', { text: String(num) }), dot, word);
       this.layer.append(node);
-      return { node, word, stroke: -1, x: NaN, y: NaN, tx: 0, ty: 0, w: 0, front: true };
+      return { node, word, num, stroke: -1, x: NaN, y: NaN, tx: 0, ty: 0, w: 0, front: true };
     });
   }
 
@@ -96,7 +97,15 @@ export class StrokeLabels {
     order.sort((a, b) => this.chips[a].ty - this.chips[b].ty);
     for (let k = 0; k < n; k++) {
       const c = this.chips[order[k]];
-      if (!c.w) c.w = c.node.offsetWidth || 72; // measured once per text change
+      if (!c.w) {
+        // Layout read only the first time a chip shows a given text.
+        const key = `${c.num}:${c.stroke}`;
+        c.w = this.widths.get(key) ?? 0;
+        if (!c.w) {
+          c.w = c.node.offsetWidth || 72;
+          this.widths.set(key, c.w);
+        }
+      }
       let moved = true;
       for (let guard = 0; moved && guard < n; guard++) {
         moved = false;

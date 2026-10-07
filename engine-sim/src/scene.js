@@ -1147,7 +1147,7 @@ export class EngineView {
    */
   adaptQuality(frameMs) {
     const t = this.frameTimes;
-    t.push(frameMs);
+    t.push(Math.min(frameMs, 100)); // one hitch (shader compile, tab switch) must not sink the average
     if (t.length < QUALITY_WINDOW) return;
     let sum = 0;
     for (const v of t) sum += v;

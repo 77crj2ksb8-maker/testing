@@ -34,6 +34,7 @@ class ParticlePool {
     this.drag = new Float32Array(capacity);
     this.next = 0;
     this.alive = 0;
+    this.fresh = false; // emitted since the last update
     const geo = new THREE.BufferGeometry();
     this.aPos = new THREE.BufferAttribute(this.pos, 3).setUsage(THREE.DynamicDrawUsage);
     this.aCol = new THREE.BufferAttribute(this.col, 4).setUsage(THREE.DynamicDrawUsage);
@@ -48,6 +49,7 @@ class ParticlePool {
   }
 
   emit(x, y, z, vx, vy, vz, life, s0, s1, r, g, b, a, grav, drag) {
+    this.fresh = true;
     const i = this.next;
     this.next = (this.next + 1) % this.cap;
     const o = i * 3;
@@ -70,6 +72,8 @@ class ParticlePool {
   }
 
   update(dt) {
+    if (!this.alive && !this.fresh && !this.wasAlive) return; // idle pool: nothing to step
+    this.fresh = false;
     let alive = 0;
     for (let i = 0; i < this.cap; i++) {
       const c = i * 4;
@@ -109,6 +113,9 @@ class ParticlePool {
   clear() {
     this.life.fill(0);
     this.col.fill(0);
+    this.alive = 0;
+    this.fresh = false;
+    this.wasAlive = false;
     this.points.visible = false;
     this.aCol.needsUpdate = true;
   }
