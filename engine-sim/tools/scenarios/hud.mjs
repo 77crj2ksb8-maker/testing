@@ -28,7 +28,10 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
     return { boxes: out, w: window.innerWidth, h: window.innerHeight };
   }, [...CHROME, ...extra]);
   const hit = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;
+  // Let CSS transitions (the toast's 8 px slide-in) finish: headless frames are slow enough to catch them mid-way.
+  const rest = () => evaluate(() => Promise.allSettled(document.getAnimations().filter((a) => a instanceof window.CSSTransition).map((a) => a.finished)).then(() => true));
   async function checkLayout(label, extra = []) {
+    await rest();
     const { boxes, w, h } = await rects(extra);
     const keys = Object.keys(boxes);
     const clashes = [];
@@ -346,17 +349,51 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
   // ── Tool rail: camera, display cycle, explode, cinematic ─────────────────
   const order = await evaluate(() => [...document.querySelectorAll('#tool-rail .tool-btn')].map((b) => [b.id, Number(b.style.order)]));
   expect(['camera', 'cinematic', 'explode', 'display', 'freeze', 'garage'].every((id) => order.some(([b, o]) => b === `tool-${id}` && o >= 10 && o <= 40)), `rail buttons at orders 10–40 (${order.map((o) => o.join(':'))})`);
+  // Camera: one tap per preset walks the whole cycle and wraps; a reset view starts it over.
+  const presets = await evaluate(() => [...(window.__app.view.cameraPresets ?? ['hero'])]);
+  const toastText = () => evaluate(() => document.getElementById('toast').textContent);
+  const seenLabels = [];
+  for (let i = 0; i < presets.length; i++) {
+    await tap('#tool-camera');
+    seenLabels.push(await toastText());
+  }
+  expect(seenLabels.every((t) => /^Camera: \S/.test(t)) && new Set(seenLabels).size === presets.length,
+    `camera button names each of the ${presets.length} presets once per cycle (${seenLabels.join(', ')})`);
+  await evaluate(() => window.__app.view.resetView());
   await tap('#tool-camera');
-  expect(/^Camera: /.test(await evaluate(() => document.getElementById('toast').textContent)), 'camera button names the preset in a toast');
+  const afterReset = await toastText();
+  expect(afterReset === seenLabels[0], `after a view reset the camera cycle starts again (${afterReset})`);
+  await settle();
+  await shot('hud-camera-preset');
+  await evaluate(() => window.__app.view.resetView());
+  // Cinematic: the button follows the view, which drops the orbit on a reset or a user drag.
+  await tap('#tool-cinematic');
+  const cine = await evaluate(() => ({ view: window.__app.view.cinematic, pressed: document.getElementById('tool-cinematic').getAttribute('aria-pressed') }));
+  expect(cine.view === true && cine.pressed === 'true', `cinematic orbit on (${JSON.stringify(cine)})`);
+  await evaluate(() => window.__app.view.resetView());
+  await page.waitForTimeout(900);
+  const cineOff = await evaluate(() => ({ view: window.__app.view.cinematic, pressed: document.getElementById('tool-cinematic').getAttribute('aria-pressed') }));
+  expect(cineOff.view === false && cineOff.pressed === 'false', `the cinematic button releases when the view drops the orbit (${JSON.stringify(cineOff)})`);
   await tap('#tool-display');
   expect(await evaluate(() => window.__app.settings.xray && !window.__app.settings.cutaway), 'display cycle: glass → x-ray');
   await tap('#tool-display');
   expect(await evaluate(() => !window.__app.settings.xray && window.__app.settings.cutaway), 'display cycle: x-ray → cutaway');
   await tap('#tool-display');
   expect(await evaluate(() => !window.__app.settings.xray && !window.__app.settings.cutaway), 'display cycle: cutaway → glass');
+  await tap('#tool-display');
   await tap('#tool-explode');
-  expect(await evaluate(() => document.getElementById('tool-explode').getAttribute('aria-pressed') === 'true'), 'explode toggles on');
+  expect(await evaluate(() => document.getElementById('tool-explode').getAttribute('aria-pressed') === 'true' && window.__app.view.explodeTarget === 1), 'explode toggles on');
+  // A different engine keeps the exploded view (and the button state with it).
+  await evaluate(() => window.__app.actions.loadGarage('v12-65'));
+  await page.waitForTimeout(1500);
+  expect(await evaluate(() => window.__app.view.explodeTarget === 1), 'the exploded view survives an engine change');
+  await shot('hud-exploded-xray');
   await tap('#tool-explode');
+  await tap('#tool-display');
+  await tap('#tool-display');
+  const back = await evaluate(() => ({ explode: window.__app.view.explodeTarget, x: window.__app.settings.xray, c: window.__app.settings.cutaway }));
+  expect(back.explode === 0 && !back.x && !back.c, `explode off and glass display again (${JSON.stringify(back)})`);
+  await evaluate(() => window.__app.actions.loadGarage('flat6-9k'));
 
   // ── Freeze + scrub ───────────────────────────────────────────────────────
   for (const vp of [VIEWPORTS[0], VIEWPORTS[3]]) {
@@ -436,6 +473,7 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
       window.__app.hud.update(0);
     });
     await settle();
+    await rest();
     const clear = await evaluate(() => {
       const r = (n) => n.getBoundingClientRect();
       const stall = r(document.getElementById('stall'));
