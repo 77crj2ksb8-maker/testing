@@ -28,7 +28,13 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
     return { boxes: out, w: window.innerWidth, h: window.innerHeight };
   }, [...CHROME, ...extra]);
   const hit = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;
+  // Let CSS transitions (the toast's 8 px slide-in) finish: headless frames are slow enough to catch them mid-way.
+  const rest = () => evaluate(() => {
+    for (const a of document.getAnimations()) if (a instanceof window.CSSTransition) a.finish();
+    return true;
+  });
   async function checkLayout(label, extra = []) {
+    await rest();
     const { boxes, w, h } = await rects(extra);
     const keys = Object.keys(boxes);
     const clashes = [];
@@ -281,6 +287,31 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
   expect(await evaluate(() => !document.getElementById('opt-launch-field').hidden), 'launch control reveals the launch-rpm slider');
   await tap('#opt-launch');
   await tap('#opt-induction .chip[data-value="na"]');
+  // A layout picked by hand after a garage build starts from its own defaults
+  // (not the rotary's 1.3 L, idle, turbos and garage tag).
+  await evaluate(() => window.__app.actions.loadGarage('tt-rotary'));
+  await settle();
+  expect(/Twin-turbo 2-rotor/.test(await evaluate(() => document.getElementById('opt-garage-note').textContent)), 'settings name the fitted garage build');
+  await page.locator('#opt-preset .chip').filter({ hasText: /^V8 Flatplane$/ }).click();
+  await page.locator('#opt-cylinders .chip').filter({ hasText: /^V12$/ }).click();
+  const v12 = await evaluate(() => {
+    const a = window.__app;
+    return {
+      cyl: a.profile.cylinders?.length, l: a.profile.displacementL, garage: a.settings.garage, induction: a.settings.induction,
+      idle: a.settings.idleRpm, bore: a.settings.boreStroke, note: document.getElementById('opt-garage-note').textContent,
+    };
+  });
+  expect(v12.cyl === 12 && v12.l > 4 && v12.garage === null && v12.induction === 'na' && v12.idle === 800 && v12.bore === 1 && !/Loaded/.test(v12.note),
+    `V12 picked after the rotary build gets V12 defaults (${JSON.stringify(v12)})`);
+  // Hand-editing a garage build's engine untags it.
+  await evaluate(() => window.__app.actions.loadGarage('smallblock'));
+  await evaluate(() => {
+    const r = document.getElementById('opt-idle');
+    r.value = '750';
+    r.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+  const edited = await evaluate(() => ({ garage: window.__app.settings.garage, idle: window.__app.settings.idleRpm }));
+  expect(edited.garage === null && edited.idle === 750, `editing the idle clears the garage tag (${JSON.stringify(edited)})`);
   // Cylinder chips name boxers and the V-twin properly.
   await evaluate(() => window.__app.apply({ preset: 'boxer', cylinders: 4, displacementL: null, redlineRpm: null }, 'engine'));
   const boxer = await evaluate(() => [...document.querySelectorAll('#opt-cylinders .chip')].map((c) => c.textContent));
@@ -298,6 +329,8 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
   await settle();
   const cards = await evaluate(() => [...document.querySelectorAll('.garage-card')].map((c) => c.textContent));
   expect(cards.length === 12, `garage lists all 12 builds (${cards.length})`);
+  const fittedCards = await evaluate(() => document.querySelectorAll('.garage-card[aria-current="true"]').length);
+  expect(fittedCards === 0, `no build is marked fitted on a hand-built V-twin (${fittedCards})`);
   expect(cards.every((t) => /\d+hp/.test(t.replace(/\s/g, '')) && /Nm/.test(t) && /redline/.test(t)), 'every card shows hp, Nm and redline');
   await shot('hud-garage');
   await page.locator('.garage-card[data-id="flat6-9k"]').click();
@@ -319,17 +352,55 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
   // ── Tool rail: camera, display cycle, explode, cinematic ─────────────────
   const order = await evaluate(() => [...document.querySelectorAll('#tool-rail .tool-btn')].map((b) => [b.id, Number(b.style.order)]));
   expect(['camera', 'cinematic', 'explode', 'display', 'freeze', 'garage'].every((id) => order.some(([b, o]) => b === `tool-${id}` && o >= 10 && o <= 40)), `rail buttons at orders 10–40 (${order.map((o) => o.join(':'))})`);
+  // Camera: one tap per preset walks the whole cycle and wraps; a reset view starts it over.
+  const presets = await evaluate(() => [...(window.__app.view.cameraPresets ?? ['hero'])]);
+  const toastText = () => evaluate(() => document.getElementById('toast').textContent);
+  const seenLabels = [];
+  for (let i = 0; i < presets.length; i++) {
+    await tap('#tool-camera');
+    seenLabels.push(await toastText());
+  }
+  expect(seenLabels.every((t) => /^Camera: \S/.test(t)) && new Set(seenLabels).size === presets.length,
+    `camera button names each of the ${presets.length} presets once per cycle (${seenLabels.join(', ')})`);
+  await evaluate(() => window.__app.view.resetView());
   await tap('#tool-camera');
-  expect(/^Camera: /.test(await evaluate(() => document.getElementById('toast').textContent)), 'camera button names the preset in a toast');
+  const afterReset = await toastText();
+  expect(afterReset === seenLabels[0], `after a view reset the camera cycle starts again (${afterReset})`);
+  await settle();
+  await shot('hud-camera-preset');
+  await evaluate(() => window.__app.view.resetView());
+  // Cinematic: the button follows the view, which drops the orbit on a reset or a user drag.
+  await tap('#tool-cinematic');
+  const cine = await evaluate(() => ({ view: window.__app.view.cinematic, pressed: document.getElementById('tool-cinematic').getAttribute('aria-pressed') }));
+  expect(cine.view === true && cine.pressed === 'true', `cinematic orbit on (${JSON.stringify(cine)})`);
+  await evaluate(() => {
+    const v = window.__app.view;
+    v.resetView(); // the real view drops the orbit here
+    if (v.cinematic) v.setCinematic(false); // the placeholder view does not
+  });
+  await page.waitForTimeout(900);
+  const cineOff = await evaluate(() => ({ view: window.__app.view.cinematic, pressed: document.getElementById('tool-cinematic').getAttribute('aria-pressed') }));
+  expect(cineOff.view === false && cineOff.pressed === 'false', `the cinematic button releases when the view drops the orbit (${JSON.stringify(cineOff)})`);
   await tap('#tool-display');
   expect(await evaluate(() => window.__app.settings.xray && !window.__app.settings.cutaway), 'display cycle: glass → x-ray');
   await tap('#tool-display');
   expect(await evaluate(() => !window.__app.settings.xray && window.__app.settings.cutaway), 'display cycle: x-ray → cutaway');
   await tap('#tool-display');
   expect(await evaluate(() => !window.__app.settings.xray && !window.__app.settings.cutaway), 'display cycle: cutaway → glass');
+  await tap('#tool-display');
   await tap('#tool-explode');
-  expect(await evaluate(() => document.getElementById('tool-explode').getAttribute('aria-pressed') === 'true'), 'explode toggles on');
+  expect(await evaluate(() => document.getElementById('tool-explode').getAttribute('aria-pressed') === 'true' && window.__app.view.explodeTarget === 1), 'explode toggles on');
+  // A different engine keeps the exploded view (and the button state with it).
+  await evaluate(() => window.__app.actions.loadGarage('v12-65'));
+  await page.waitForTimeout(1500);
+  expect(await evaluate(() => window.__app.view.explodeTarget === 1), 'the exploded view survives an engine change');
+  await shot('hud-exploded-xray');
   await tap('#tool-explode');
+  await tap('#tool-display');
+  await tap('#tool-display');
+  const back = await evaluate(() => ({ explode: window.__app.view.explodeTarget, x: window.__app.settings.xray, c: window.__app.settings.cutaway }));
+  expect(back.explode === 0 && !back.x && !back.c, `explode off and glass display again (${JSON.stringify(back)})`);
+  await evaluate(() => window.__app.actions.loadGarage('flat6-9k'));
 
   // ── Freeze + scrub ───────────────────────────────────────────────────────
   for (const vp of [VIEWPORTS[0], VIEWPORTS[3]]) {
@@ -409,6 +480,7 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
       window.__app.hud.update(0);
     });
     await settle();
+    await rest();
     const clear = await evaluate(() => {
       const r = (n) => n.getBoundingClientRect();
       const stall = r(document.getElementById('stall'));
@@ -419,6 +491,8 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
         stallW: Math.round(stall.width),
         stallHits: buttons.filter((b) => hits(b, stall)).length,
         toastHits: buttons.filter((b) => hits(b, toast)).length,
+        toast: [toast.left, toast.top, toast.right, toast.bottom].map(Math.round).join(','),
+        hit: [...document.querySelectorAll('#tool-rail .tool-btn')].filter((b) => hits(r(b), toast) || hits(r(b), stall)).map((b) => `${b.id}@${[r(b).left, r(b).top, r(b).right, r(b).bottom].map(Math.round).join(',')}`).join(' '),
         toastStall: hits(toast, stall),
         stallOnControls: ['.shifter-wrap', '.pedal-wrap', '.tach'].some((s) => hits(r(document.querySelector(s)), stall)),
       };

@@ -7,7 +7,7 @@
 import { Paddles } from '../controls.js';
 import { GarageSheet } from '../ui.js';
 import { GARAGE, garagePatch } from '../presets.js';
-import { scrubPeriod, stepFiring, lastFired, nextDisplayMode, displayModeOf, DISPLAY_MODES, garageSpecs } from '../hud.js';
+import { scrubPeriod, stepFiring, lastFired, nextDisplayMode, displayModeOf, DISPLAY_MODES, garageSpecs, fittedGarage } from '../hud.js';
 
 const $ = (id) => document.getElementById(id);
 const mod = (a, n) => ((a % n) + n) % n;
@@ -49,10 +49,10 @@ export default {
         }
       },
     });
-    app.actions.openGarage = () => garage.open(app.settings.garage);
+    app.actions.openGarage = () => garage.open(fittedGarage(app.settings, GARAGE)?.id ?? null);
     app.actions.closeGarage = () => garage.close();
     app.settingsPanel.onGarage = () => app.actions.openGarage();
-    app.settingsPanel.garageName = (id) => GARAGE.find((g) => g.id === id)?.name ?? '';
+    app.settingsPanel.garageName = (settings) => fittedGarage(settings, GARAGE)?.name ?? '';
 
     // ── Sequential paddles ──────────────────────────────────────────────────
     const shifter = $('shifter');
@@ -118,7 +118,9 @@ export default {
       id: 'camera', label: 'Camera angle', icon: ICONS.camera, order: 10,
       onClick: () => {
         const presets = view.cameraPresets?.length ? view.cameraPresets : ['hero'];
-        presetIndex = (presetIndex + 1) % presets.length;
+        // Continue from the view's own preset when it says (a reset view goes back to the first).
+        const current = presets.indexOf(view.cameraPreset ?? view.rig?.active);
+        presetIndex = ((current >= 0 ? current : presetIndex) + 1) % presets.length;
         const label = view.setCameraPreset?.(presets[presetIndex]) ?? presets[presetIndex];
         cameraBtn.title = `Camera: ${label}`;
         app.toast(`Camera: ${label}`, '', 1300);
@@ -254,10 +256,24 @@ export default {
       }
     }
 
+    // Place the rail before main's layout pass measures it: features that read
+    // the rail on 'layout' (stroke-label blockers) subscribed before this one.
+    // Window resize listeners added here run ahead of main's, and the first
+    // 'settings' event comes before the first layout.
+    window.addEventListener('resize', place);
+    window.visualViewport?.addEventListener('resize', place);
+    let placed = false;
+    // Rows and columns depend on the button count: re-place when a feature adds or removes one later.
+    new window.MutationObserver(() => placed && place()).observe(rail, { childList: true });
+
     // ── Bus wiring ──────────────────────────────────────────────────────────
     let displayShown = '';
     bus.on('settings', ({ settings }) => {
       applyMode(settings.mode);
+      if (!placed) {
+        placed = true;
+        place();
+      }
       app.telemetry.setUnits?.(settings.units);
       const mode = displayModeOf(settings);
       if (mode !== displayShown) {
