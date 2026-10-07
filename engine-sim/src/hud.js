@@ -1,12 +1,14 @@
 // Core HUD: tach card (digital or analog), shift lights, gauges, assist pills,
-// gear and speed, and the stall card. main.js calls update(dt) once per frame.
-// The helpers exported at the top are pure (no DOM) so Node tests can use them.
+// gear and speed, the sequential paddle readout and the stall card.
+// main.js calls update(dt) once per frame. The helpers exported at the top are
+// pure (no DOM) so Node tests can use them.
 
 import { el, formatSpeed, speedUnit } from './dom.js';
-import { buildProfile, DEFAULT_SETTINGS, wotTorque, powerHp } from './config.js';
+import { buildProfile, DEFAULT_SETTINGS, peakFigures, layoutOf } from './config.js';
 
 const $ = (id) => document.getElementById(id);
 const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+const mod = (a, n) => ((a % n) + n) % n;
 
 // ── Pure helpers ────────────────────────────────────────────────────────────
 
@@ -33,12 +35,37 @@ export function shiftLightLevel(rpm, profile, limiting = false) {
 
 /** Temperature state: 0 cold, 1 normal, 2 hot (warning), 3 critical. */
 export function tempLevel(c, kind = 'coolant') {
-  const [cold, hot, crit] = kind === 'oil' ? [70, 128, 140] : [65, 108, 116];
+  const [cold, hot, crit] = kind === 'oil' ? [70, 128, 140] : [65, 108, 118];
   return c >= crit ? 3 : c >= hot ? 2 : c < cold ? 0 : 1;
 }
 
 /** Engine health state from damage 0..1: 1 good, 2 worn, 3 critical. */
 export const healthLevel = (damage) => (damage >= 0.65 ? 3 : damage >= 0.3 ? 2 : 1);
+
+/** Boost gauge text: two decimals, a real minus sign for vacuum. */
+export function formatBoost(bar) {
+  const v = Math.round(bar * 100) / 100;
+  return v < 0 ? `−${Math.abs(v).toFixed(2)}` : v.toFixed(2);
+}
+
+/** Stall-card copy for an engine that is off. blownCause: 'over-rev' | 'overheat' | null. */
+export function stallCopy({ blown, blownCause, canCrank }) {
+  if (blown) {
+    if (blownCause === 'overheat') {
+      return { title: 'Engine cooked', help: 'It overheated until the head gasket failed. Rebuild it, then watch the water gauge.', button: 'REBUILD', tone: 'blown' };
+    }
+    if (blownCause === 'over-rev') {
+      return { title: 'Engine blown', help: 'It was over-revved past the redline and a rod let go. Rebuild it to drive on.', button: 'REBUILD', tone: 'blown' };
+    }
+    return { title: 'Engine destroyed', help: 'It is not going to start like this. Rebuild it first.', button: 'REBUILD', tone: 'blown' };
+  }
+  return {
+    title: 'Engine stalled',
+    help: canCrank ? 'Ready. Tap START to crank it over.' : 'Press the clutch or select neutral, then start.',
+    button: 'START',
+    tone: 'stall',
+  };
+}
 
 // Analog dial sweep: 240° clockwise from lower-left to lower-right (canvas angles).
 export const DIAL_START = (5 * Math.PI) / 6;
@@ -53,8 +80,6 @@ export const dialAngle = (rpm, maxRpm) => DIAL_START + DIAL_SWEEP * clamp(rpm / 
 /** Crank degrees in one full cycle: 720 for four-strokes, 1080 for a rotary (rotor turns once). */
 export const scrubPeriod = (profile) => (profile.kind === 'rotary' ? 1080 : 720);
 
-const mod = (a, n) => ((a % n) + n) % n;
-
 /** Crank angles (sorted, within one cycle) at which something fires. */
 export function firingAngles(profile) {
   if (profile.kind === 'rotary') {
@@ -68,9 +93,8 @@ export function firingAngles(profile) {
 
 /** Next (dir 1) or previous (dir -1) firing angle from deg, wrapping around the cycle. */
 export function stepFiring(profile, deg, dir) {
-  const period = scrubPeriod(profile);
   const angles = firingAngles(profile);
-  const d = mod(deg, period);
+  const d = mod(deg, scrubPeriod(profile));
   if (dir > 0) return angles.find((a) => a > d + 0.5) ?? angles[0];
   for (let i = angles.length - 1; i >= 0; i--) if (angles[i] < d - 0.5) return angles[i];
   return angles[angles.length - 1];
@@ -108,9 +132,18 @@ export function nextDisplayMode(s) {
   return DISPLAY_MODES[(i + 1) % DISPLAY_MODES.length];
 }
 
-/** Short layout name for a profile: V8, I4, Flat-6, V-twin, 2-rotor. */
+/** Short label for a cylinder count within a layout family: V8, I4, B4, F6, V2, "2 rotors". */
+export function cylinderLabel(family, n) {
+  if (family === 'rotary') return `${n} rotor${n > 1 ? 's' : ''}`;
+  if (family === 'boxer') return n === 4 ? 'B4' : `F${n}`;
+  if (family === 'vtwin') return 'V2';
+  if (family === 'v') return `V${n}`;
+  return `I${n}`;
+}
+
+/** Layout name for a profile: V8, I4, Boxer-4, Flat-6, V-twin, 2-rotor. */
 export function layoutLabel(profile) {
-  const layout = profile.layout ?? (profile.kind === 'rotary' ? 'rotary' : profile.banks === 2 ? 'v' : 'inline');
+  const layout = layoutOf(profile);
   const n = profile.kind === 'rotary' ? profile.rotors : profile.cylinders.length;
   if (layout === 'rotary') return `${n}-rotor`;
   if (layout === 'vtwin') return 'V-twin';
@@ -119,43 +152,43 @@ export function layoutLabel(profile) {
   return `I${n}`;
 }
 
-export const INDUCTION_LABELS = { na: 'NA', turbo: 'Turbo', 'twin-turbo': 'Twin-turbo', supercharger: 'Supercharged' };
+export const INDUCTION_LABELS = { na: 'Naturally aspirated', turbo: 'Turbo', 'twin-turbo': 'Twin-turbo', supercharger: 'Supercharged' };
 
-/** Headline numbers for a garage build: displacement, layout, peak power and torque, redline. */
+/** Headline numbers for a garage build: layout, displacement, peak power and torque, redline, induction. */
 export function garageSpecs(entry) {
   const profile = buildProfile({ ...DEFAULT_SETTINGS, ...entry.settings });
-  let peakNm = 0;
-  let peakNmRpm = 0;
-  let peakHp = 0;
-  let peakHpRpm = 0;
-  for (let rpm = 1000; rpm <= profile.redlineRpm; rpm += 50) {
-    const t = wotTorque(profile, rpm);
-    const hp = powerHp(t, rpm);
-    if (t > peakNm) {
-      peakNm = t;
-      peakNmRpm = rpm;
-    }
-    if (hp > peakHp) {
-      peakHp = hp;
-      peakHpRpm = rpm;
-    }
-  }
-  const induction = entry.settings?.induction ?? 'na';
+  const peak = peakFigures(profile);
+  const induction = profile.induction?.kind ?? 'na';
   return {
-    displacementL: profile.displacementL,
     layout: layoutLabel(profile),
-    induction: INDUCTION_LABELS[induction] ?? induction,
-    peakHp: Math.round(peakHp),
-    peakHpRpm,
-    peakNm: Math.round(peakNm),
-    peakNmRpm,
+    displacementL: Math.round(profile.displacementL * 10) / 10,
+    induction,
+    inductionLabel: INDUCTION_LABELS[induction] ?? induction,
+    boostBar: induction === 'na' ? 0 : profile.induction.targetBar,
+    peakHp: Math.round(peak.hp),
+    peakHpRpm: peak.hpRpm,
+    peakNm: Math.round(peak.nm),
+    peakNmRpm: peak.nmRpm,
     redlineRpm: profile.redlineRpm,
+    vvl: !!profile.vvlRpm,
   };
+}
+
+/** 6,600 style thousands separators without locale lookups. */
+export const groupThousands = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+
+/**
+ * What the sequential paddle readout shows: the gear now, or the gear a shift
+ * in flight is heading for. gearbox.shift is the in-flight sequential shift.
+ */
+export function paddleReadout(gear, shift) {
+  if (shift && shift.source === 'sequential' && shift.to !== gear && shift.from === gear) return { gear: String(shift.to), pending: true };
+  return { gear: String(gear), pending: false };
 }
 
 // ── Analog tachometer ───────────────────────────────────────────────────────
 
-/** Canvas tachometer. Static face is cached; the needle layer redraws only when something shown changes. */
+/** Canvas tachometer. The static face is cached; the live layer redraws only when something shown changes. */
 export class AnalogTach {
   constructor(canvas) {
     this.canvas = canvas;
@@ -166,13 +199,15 @@ export class AnalogTach {
     this.h = 0;
     this.dpr = 1;
     this.redline = 0;
+    this.max = 1000;
     this.faceDirty = true;
-    // Last drawn state (numbers only, compared without allocating).
+    this.theme = null;
+    // Last drawn state, compared field by field so the check allocates nothing.
     this.drawn = { rpmQ: -1, gear: '', speed: -1, units: '', flags: -1, mode: '' };
-    this.fonts = null;
+    this.speedText = '';
   }
 
-  /** Re-measure (call on layout changes, never per frame). */
+  /** Re-measure (on layout changes, never per frame). */
   measure() {
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
@@ -190,6 +225,7 @@ export class AnalogTach {
 
   invalidate() {
     this.faceDirty = true;
+    this.theme = null;
   }
 
   readTheme() {
@@ -197,13 +233,14 @@ export class AnalogTach {
     const v = (n) => cs.getPropertyValue(n).trim();
     this.theme = {
       fg: v('--fg'), muted: v('--muted'), faint: v('--faint'), red: v('--red'), amber: v('--amber'),
-      accent: v('--throttle'), track: '#222833', display: v('--font-display'), data: v('--font-data'),
+      accent: v('--throttle'), track: '#222833', hub: v('--panel-solid'), display: v('--font-display'), data: v('--font-data'),
     };
   }
 
   geometry() {
-    const pad = 4;
-    const r = Math.min(this.w / 2 - pad, (this.h - pad * 2) / 1.5);
+    const pad = 3;
+    // The 240° sweep reaches down to sin(30°) = 0.5 r below the centre; leave room for the status tag.
+    const r = Math.min(this.w / 2 - pad, (this.h - pad - 10) / 1.5);
     return { cx: this.w / 2, cy: pad + r, r };
   }
 
@@ -231,8 +268,8 @@ export class AnalogTach {
     ctx.stroke();
     ctx.globalAlpha = 1;
 
-    // Ticks every 500 rpm, numerals every 1000.
-    const big = r > 70;
+    // Ticks every 500 rpm, numerals every 1000 (every 2000 on small dials with a long scale).
+    const big = r > 64;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.font = `600 ${big ? 13 : 11}px ${t.display}`;
@@ -259,7 +296,7 @@ export class AnalogTach {
     }
     ctx.font = `500 9px ${t.data}`;
     ctx.fillStyle = t.faint;
-    ctx.fillText('×1000 rpm', cx, cy - r * 0.42);
+    ctx.fillText('×1000 rpm', cx, cy - r * 0.36);
     this.redline = redlineRpm;
     this.max = max;
     this.faceDirty = false;
@@ -267,7 +304,7 @@ export class AnalogTach {
 
   /**
    * Draw if anything visible changed. flags: bit 1 limiter, bit 2 wheelspin.
-   * Returns true when it redrew.
+   * speed is a number in the display units. Returns true when it redrew.
    */
   update(rpm, redlineRpm, gear, speed, units, flags, mode) {
     if (this.w < 10) return false;
@@ -276,6 +313,7 @@ export class AnalogTach {
     const faceChanged = this.faceDirty || redlineRpm !== this.redline;
     if (!faceChanged && d.rpmQ === rpmQ && d.gear === gear && d.speed === speed && d.units === units && d.flags === flags && d.mode === mode) return false;
     if (faceChanged) this.drawFace(redlineRpm);
+    if (d.speed !== speed) this.speedText = String(speed);
     d.rpmQ = rpmQ;
     d.gear = gear;
     d.speed = speed;
@@ -286,60 +324,62 @@ export class AnalogTach {
     const t = this.theme;
     const ctx = this.ctx;
     const { cx, cy, r } = this.geometry();
-    const max = this.max;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     ctx.drawImage(this.face, 0, 0);
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     // Live arc on the track.
-    const a = dialAngle(rpm, max);
+    const a = dialAngle(rpm, this.max);
     const hot = rpm > redlineRpm * 0.92;
+    const color = hot ? t.red : t.accent;
     ctx.lineCap = 'butt';
     ctx.lineWidth = 6;
-    ctx.strokeStyle = hot ? t.red : t.accent;
+    ctx.strokeStyle = color;
+    ctx.globalAlpha = 0.9;
     ctx.beginPath();
     ctx.arc(cx, cy, r - 4, DIAL_START, a);
     ctx.stroke();
+    ctx.globalAlpha = 1;
 
     // Needle with a short tail and a hub.
     const c = Math.cos(a);
     const s = Math.sin(a);
     ctx.lineCap = 'round';
     ctx.lineWidth = 3;
-    ctx.strokeStyle = hot ? t.red : t.accent;
+    ctx.strokeStyle = color;
     ctx.beginPath();
     ctx.moveTo(cx - c * 10, cy - s * 10);
     ctx.lineTo(cx + c * (r - 9), cy + s * (r - 9));
     ctx.stroke();
     ctx.beginPath();
     ctx.arc(cx, cy, 6, 0, Math.PI * 2);
-    ctx.fillStyle = '#0d1016';
+    ctx.fillStyle = t.hub;
     ctx.fill();
     ctx.lineWidth = 2;
     ctx.stroke();
 
     // Gear and speed in the lower half, where the needle rarely sits.
+    const big = r > 64;
+    const gy = cy + r * 0.4;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
-    const big = r > 70;
     ctx.font = `800 ${big ? 30 : 24}px ${t.display}`;
     ctx.fillStyle = gear === 'R' ? t.fg : t.accent;
-    ctx.fillText(gear, cx, cy + r * 0.42);
+    ctx.fillText(gear, cx, gy);
+    const sy = gy + (big ? 17 : 14);
     ctx.font = `600 ${big ? 14 : 12}px ${t.display}`;
-    ctx.fillStyle = t.fg;
+    const wNum = ctx.measureText(this.speedText).width;
     const unit = speedUnit(units);
-    const num = String(speed);
-    const wNum = ctx.measureText(num).width;
     ctx.font = `600 ${big ? 10 : 9}px ${t.display}`;
     const wUnit = ctx.measureText(unit).width;
     const x0 = cx - (wNum + 3 + wUnit) / 2;
     ctx.textAlign = 'left';
     ctx.fillStyle = t.muted;
-    ctx.fillText(unit, x0 + wNum + 3, cy + r * 0.42 + (big ? 17 : 14));
+    ctx.fillText(unit, x0 + wNum + 3, sy);
     ctx.font = `600 ${big ? 14 : 12}px ${t.display}`;
     ctx.fillStyle = t.fg;
-    ctx.fillText(num, x0, cy + r * 0.42 + (big ? 17 : 14));
+    ctx.fillText(this.speedText, x0, sy);
 
     // Status tag between the arc ends: limiter, then wheelspin, then gearbox mode.
     const tag = flags & 1 ? 'LIMITER' : flags & 2 ? 'WHEELSPIN' : mode;
@@ -347,7 +387,7 @@ export class AnalogTach {
       ctx.textAlign = 'center';
       ctx.font = `500 9px ${t.data}`;
       ctx.fillStyle = flags & 1 ? t.red : flags & 2 ? t.amber : t.muted;
-      ctx.fillText(tag, cx, Math.min(this.h - 2, cy + r * 0.5 + 4));
+      ctx.fillText(tag, cx, Math.min(this.h - 2, sy + 12));
     }
     return true;
   }
@@ -356,13 +396,16 @@ export class AnalogTach {
 // ── HUD ─────────────────────────────────────────────────────────────────────
 
 const LEVEL_CLASS = ['is-cold', '', 'is-warn', 'is-crit'];
+const boostText = (centibar) => formatBoost(centibar / 100);
 
-function gauge(kind, label) {
+function gauge(kind, label, unit) {
   const value = el('output', { class: 'gauge-value' }, '—');
   const fill = el('i');
   const node = el('div', { class: 'gauge', dataset: { kind } },
-    el('span', { class: 'gauge-label' }, label), value, el('span', { class: 'gauge-bar', 'aria-hidden': 'true' }, fill));
-  return { node, value, fill, shown: '', level: -1, fillQ: -1, visible: true };
+    el('span', { class: 'gauge-label' }, label),
+    el('span', { class: 'gauge-read' }, value, unit ? el('span', { class: 'gauge-unit' }, unit) : null),
+    el('span', { class: 'gauge-bar', 'aria-hidden': 'true' }, fill));
+  return { node, value, fill, key: NaN, level: -1, fillQ: -1, visible: true };
 }
 
 export class Hud {
@@ -372,14 +415,21 @@ export class Hud {
       rpm: $('rpm'), fill: $('rpm-fill'), redline: $('rpm-redline'), gear: $('gear'), speed: $('speed'),
       speedUnit: $('speed-unit'), limiter: $('limiter'), traction: $('traction'), stall: $('stall'),
       stallTitle: $('stall-title'), stallHelp: $('stall-help'), start: $('btn-start'),
-      paddleGear: $('paddle-gear'), modeTag: $('mode-tag'),
+      paddleGear: $('paddle-gear'),
     };
     this.shown = {};
     this.spinTime = 0;
     this.spinHold = 0;
     this.tcHold = 0;
     this.fillQ = -1;
+    this.rpmQ = -1;
+    this.speedQ = -1;
+    this.gearShown = '';
+    this.wide = false;
+    this.hot = false;
     this.redlineShown = 0;
+    this.paddleState = { gear: '', pending: null };
+    this.stallKey = '';
 
     // Shift lights.
     this.lights = $('shift-lights');
@@ -394,22 +444,21 @@ export class Hud {
     document.fonts?.ready?.then(() => this.dial?.invalidate());
 
     // Gauges and assist pills under the tach.
-    const extra = app.ui?.hudExtra;
     this.gauges = {
-      water: gauge('water', 'Water'),
-      oil: gauge('oil', 'Oil'),
-      boost: gauge('boost', 'Boost'),
-      health: gauge('health', 'Health'),
+      water: gauge('water', 'Water', '°C'),
+      oil: gauge('oil', 'Oil', '°C'),
+      boost: gauge('boost', 'Boost', 'bar'),
+      health: gauge('health', 'Health', '%'),
     };
     this.gaugeRow = el('div', { class: 'gauges', role: 'group', 'aria-label': 'Gauges' }, ...Object.values(this.gauges).map((g) => g.node));
     this.pills = {
-      launch: el('span', { class: 'pill pill-assist', hidden: true }, 'LAUNCH'),
-      tc: el('span', { class: 'pill pill-assist', hidden: true }, 'TC'),
-      vvl: el('span', { class: 'pill pill-assist', hidden: true }, 'VVL'),
+      launch: el('span', { class: 'pill pill-assist', hidden: true, title: 'Launch control' }, 'LAUNCH'),
+      tc: el('span', { class: 'pill pill-assist', hidden: true, title: 'Traction control' }, 'TC'),
+      vvl: el('span', { class: 'pill pill-assist', hidden: true, title: 'Variable valve lift' }, 'VVL'),
     };
     this.pillState = { launch: -1, tc: -1, vvl: -1 };
     this.pillRow = el('div', { class: 'assist-pills', hidden: true }, ...Object.values(this.pills));
-    if (extra) extra.prepend(this.gaugeRow, this.pillRow);
+    app.ui?.hudExtra?.prepend(this.gaugeRow, this.pillRow);
     this.setGaugeVisible(this.gauges.boost, false);
     this.setGaugeVisible(this.gauges.health, false);
 
@@ -425,40 +474,44 @@ export class Hud {
   }
 
   setGaugeVisible(g, on) {
-    if (g.visible === on) return;
+    if (g.visible === on) return false;
     g.visible = on;
     g.node.hidden = !on;
+    return true;
   }
 
   /** Settings-driven visibility (cluster style, assist pills). Height changes re-run the app layout. */
   onSettings() {
     const { settings, profile } = this.app;
     let relayout = false;
-    const analog = settings.cluster === 'analog';
-    if (analog !== this.analog && this.dial) {
+    const analog = settings.cluster === 'analog' && !!this.dial;
+    if (analog !== this.analog) {
       this.analog = analog;
       this.digital.hidden = analog;
       this.dialCanvas.hidden = !analog;
+      // Force the digital readouts to refresh when they come back.
+      this.rpmQ = this.speedQ = this.fillQ = -1;
+      this.gearShown = '';
       relayout = true;
     }
     const want = {
       launch: !!settings.launchControl,
       tc: !!settings.tractionControl,
-      vvl: profile.kind !== 'rotary' && !!(profile.vvlRpm ?? settings.vvlRpm),
+      vvl: !!profile.vvlRpm,
     };
     let any = false;
     for (const k of Object.keys(want)) {
-      this.pills[k].hidden = !want[k];
+      if (this.pills[k].hidden === want[k]) this.pills[k].hidden = !want[k];
       any ||= want[k];
     }
     if (this.pillRow.hidden === any) {
       this.pillRow.hidden = !any;
       relayout = true;
     }
-    if (relayout && this.app.layout) {
-      // Measure after the DOM change lands; layout() also re-measures the dial.
-      this.app.layout();
-    }
+    // Boost gauge follows the configured induction so the card height only changes with settings.
+    const boosted = (profile.induction?.kind ?? settings.induction ?? 'na') !== 'na';
+    relayout = this.setGaugeVisible(this.gauges.boost, boosted) || relayout;
+    if (relayout) this.app.layout?.();
     this.dial?.invalidate();
   }
 
@@ -470,30 +523,31 @@ export class Hud {
     p.classList.toggle('is-armed', state === 1);
   }
 
-  updateGauge(g, text, level, frac) {
-    if (g.shown !== text) {
-      g.shown = text;
-      g.value.textContent = text;
+  /** key: the quantised value shown; text() only runs when it changes. */
+  updateGauge(g, key, text, level, frac) {
+    if (g.key !== key) {
+      g.key = key;
+      g.value.textContent = text(key);
     }
     if (g.level !== level) {
-      if (g.level >= 0 && LEVEL_CLASS[g.level]) g.node.classList.remove(LEVEL_CLASS[g.level]);
+      if (LEVEL_CLASS[g.level]) g.node.classList.remove(LEVEL_CLASS[g.level]);
       if (LEVEL_CLASS[level]) g.node.classList.add(LEVEL_CLASS[level]);
       g.level = level;
     }
-    const q = Math.round(clamp(frac, 0, 1) * 100);
+    const q = Math.round(clamp(frac, 0, 1) * 50);
     if (g.fillQ !== q) {
       g.fillQ = q;
-      g.fill.style.transform = `scaleX(${q / 100})`;
+      g.fill.style.transform = `scaleX(${q / 50})`;
     }
   }
 
   update(dt) {
-    const { sim, profile, settings } = this.app;
+    const { sim, profile, settings, gearbox } = this.app;
     const el = this.el;
     const rpm = sim.rpm;
-    const gear = String(sim.gear);
+    const gear = sim.gear;
     const speed = formatSpeed(sim.speedKmh, settings.units);
-    const limiting = !!(sim.fuelCut || sim.launchActive);
+    const limiter = !!sim.fuelCut && !sim.launchActive;
 
     // Wheelspin: only flag it when sustained, not the blip of a clutch catching.
     this.spinTime = sim.wheelspin && sim.throttleEffective > 0.3 ? this.spinTime + dt : 0;
@@ -501,81 +555,114 @@ export class Hud {
     const spinning = this.spinHold > 0;
 
     // Shift lights.
-    const level = shiftLightLevel(rpm, profile, limiting);
-    if (level !== this.ledLevel) {
-      this.ledLevel = level;
+    const level = shiftLightLevel(rpm, profile, !!(sim.fuelCut || sim.launchActive));
+    if (level !== this.ledLevel && this.lights) {
       const lit = level === SHIFT_FLASH ? SHIFT_LEDS : level;
-      for (let i = 0; i < this.leds.length; i++) this.leds[i].classList.toggle('is-on', i < lit);
-      this.lights.classList.toggle('is-flash', level === SHIFT_FLASH);
+      const was = this.ledLevel === SHIFT_FLASH ? SHIFT_LEDS : Math.max(0, this.ledLevel);
+      for (let i = Math.min(lit, was); i < Math.max(lit, was); i++) this.leds[i].classList.toggle('is-on', i < lit);
+      if ((level === SHIFT_FLASH) !== (this.ledLevel === SHIFT_FLASH)) this.lights.classList.toggle('is-flash', level === SHIFT_FLASH);
+      this.ledLevel = level;
     }
 
     if (this.analog) {
       const mode = settings.mode === 'auto' ? 'AUTO' : settings.mode === 'sequential' ? 'SEQ' : '';
-      this.dial.update(rpm, profile.redlineRpm, gear, speed, settings.units, (sim.fuelCut ? 1 : 0) | (spinning ? 2 : 0), mode);
+      this.dial.update(rpm, profile.redlineRpm, String(gear), speed, settings.units, (limiter ? 1 : 0) | (spinning ? 2 : 0), mode);
     } else {
-      this.setText('rpm', String(Math.round(rpm / 10) * 10));
+      const rpmQ = Math.round(rpm / 10);
+      if (rpmQ !== this.rpmQ) {
+        this.rpmQ = rpmQ;
+        el.rpm.textContent = String(rpmQ * 10);
+        // Five digits (money shifts reach 10,000+) get a narrower size so the row never overflows.
+        const wide = rpmQ >= 1000;
+        if (wide !== this.wide) {
+          this.wide = wide;
+          el.rpm.classList.toggle('is-wide', wide);
+        }
+      }
       const scale = profile.redlineRpm * 1.06;
       const q = Math.round(Math.min(1000, (rpm / scale) * 1000));
       if (q !== this.fillQ) {
         this.fillQ = q;
-        el.fill.style.width = `${q / 10}%`;
-        el.fill.classList.toggle('is-red', rpm > profile.redlineRpm * 0.92);
+        el.fill.style.transform = `scaleX(${q / 1000})`;
+        const hot = rpm > profile.redlineRpm * 0.92;
+        if (hot !== this.hot) {
+          this.hot = hot;
+          el.fill.classList.toggle('is-red', hot);
+        }
       }
       if (this.redlineShown !== profile.redlineRpm) {
         this.redlineShown = profile.redlineRpm;
         el.redline.style.left = `${((profile.redlineRpm / scale) * 100).toFixed(1)}%`;
       }
-      this.setText('gear', gear);
-      el.gear.classList.toggle('is-reverse', sim.gear === 'R');
-      this.setText('speed', String(speed));
+      if (this.gearShown !== gear) {
+        this.gearShown = gear;
+        el.gear.textContent = String(gear);
+        el.gear.classList.toggle('is-reverse', gear === 'R');
+      }
+      if (speed !== this.speedQ) {
+        this.speedQ = speed;
+        el.speed.textContent = String(speed);
+      }
       this.setText('speedUnit', speedUnit(settings.units));
-      if (el.limiter.hidden === !!sim.fuelCut) el.limiter.hidden = !sim.fuelCut;
+      if (el.limiter.hidden === limiter) el.limiter.hidden = !limiter;
       if (el.traction.hidden === spinning) el.traction.hidden = !spinning;
     }
-    if (el.paddleGear) this.setText('paddleGear', gear);
+
+    // Sequential paddles: the gear now, or the one a shift in flight is heading for.
+    if (el.paddleGear) {
+      const shift = gearbox?.shift;
+      const pendingTo = shift && shift.source === 'sequential' && shift.from === gear && shift.to !== gear ? shift.to : null;
+      const ps = this.paddleState;
+      if (ps.gear !== gear || ps.pending !== pendingTo) {
+        ps.gear = gear;
+        ps.pending = pendingTo;
+        const r = paddleReadout(gear, shift);
+        el.paddleGear.textContent = r.gear;
+        el.paddleGear.classList.toggle('is-pending', r.pending);
+      }
+    }
 
     // Gauges.
     const g = this.gauges;
-    const water = sim.coolantC ?? 88;
+    const water = sim.coolantC ?? 90;
     const oil = sim.oilC ?? 95;
-    this.updateGauge(g.water, `${Math.round(water)}°`, tempLevel(water, 'coolant'), (water - 40) / 90);
-    this.updateGauge(g.oil, `${Math.round(oil)}°`, tempLevel(oil, 'oil'), (oil - 40) / 110);
-    const boosted = !!sim.inductionKind && sim.inductionKind !== 'na';
-    this.setGaugeVisible(g.boost, boosted);
-    if (boosted) {
+    this.updateGauge(g.water, Math.round(water), String, tempLevel(water, 'coolant'), (water - 40) / 90);
+    this.updateGauge(g.oil, Math.round(oil), String, tempLevel(oil, 'oil'), (oil - 40) / 110);
+    if (g.boost.visible) {
       const b = sim.boostBar ?? 0;
       const target = Math.max(0.3, sim.boostTarget || settings.boostBar || 1);
-      const text = b < -0.005 ? `−${Math.abs(b).toFixed(2)}` : b.toFixed(2);
-      this.updateGauge(g.boost, text, b > target * 1.12 ? 2 : 1, b / (target * 1.15));
+      this.updateGauge(g.boost, Math.round(b * 100), boostText, b > target * 1.12 ? 2 : 1, (b + 1) / (target * 1.15 + 1));
     }
     const damage = sim.damage ?? 0;
-    this.setGaugeVisible(g.health, damage > 0.005 || !!sim.blown);
-    if (g.health.visible) {
+    const showHealth = damage > 0.005 || !!sim.blown;
+    if (this.setGaugeVisible(g.health, showHealth)) this.app.layout?.();
+    if (showHealth) {
       const health = sim.blown ? 0 : 1 - damage;
-      this.updateGauge(g.health, `${Math.round(health * 100)}%`, sim.blown ? 3 : healthLevel(damage), health);
+      this.updateGauge(g.health, Math.round(health * 100), String, sim.blown ? 3 : healthLevel(damage), health);
     }
 
     // Assist pills: 0 idle, 1 armed, 2 working. TC holds briefly so a short cut is readable.
     this.tcHold = sim.tcActive ? 0.4 : Math.max(0, this.tcHold - dt);
-    if (!this.pills.launch.hidden) this.setPill('launch', sim.launchActive ? 2 : sim.launchArmed ? 1 : 0);
-    if (!this.pills.tc.hidden) this.setPill('tc', this.tcHold > 0 ? 2 : 0);
-    if (!this.pills.vvl.hidden) this.setPill('vvl', sim.vvlActive ? 2 : 0);
+    if (!this.pillRow.hidden) {
+      if (!this.pills.launch.hidden) this.setPill('launch', sim.launchActive ? 2 : sim.launchArmed ? 1 : 0);
+      if (!this.pills.tc.hidden) this.setPill('tc', this.tcHold > 0 ? 2 : 0);
+      if (!this.pills.vvl.hidden) this.setPill('vvl', sim.vvlActive ? 2 : 0);
+    }
 
     const off = !sim.running && !sim.cranking;
     if (el.stall.hidden === off) el.stall.hidden = !off;
     if (off) {
-      if (sim.blown) {
-        this.setText('stallTitle', 'Engine destroyed');
-        this.setText('stallHelp', 'It is not going to start like this. Rebuild it first.');
-        this.setText('start', 'REBUILD');
-        el.start.disabled = false;
-      } else {
-        const ready = sim.canCrank();
-        this.setText('stallTitle', 'Engine stalled');
-        this.setText('start', 'START');
-        el.start.disabled = !ready;
-        this.setText('stallHelp', ready ? 'Ready. Tap START to crank it over.' : 'Press the clutch or select neutral, then start.');
+      const ready = !sim.blown && sim.canCrank();
+      const key = sim.blown ? `b:${sim.blownCause}` : ready ? 'ready' : 'wait';
+      if (key !== this.stallKey) {
+        this.stallKey = key;
+        const copy = stallCopy({ blown: sim.blown, blownCause: sim.blownCause, canCrank: ready });
+        this.setText('stallTitle', copy.title);
+        this.setText('stallHelp', copy.help);
+        this.setText('start', copy.button);
+        el.start.disabled = !sim.blown && !ready;
+        el.stall.classList.toggle('is-blown', !!sim.blown);
       }
-    }
+    } else this.stallKey = '';
   }
 }

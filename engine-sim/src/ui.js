@@ -1,9 +1,14 @@
-// Settings sheet and telemetry panel (stat tiles, torque/power charts, shift log).
+// Settings sheet, garage sheet and telemetry panel (stat tiles, torque/power
+// charts, shift log).
 
 import { PRESETS, PRESET_ORDER, GEAR_RATIO_PRESETS, wotTorque, powerHp, firingOrderLabel } from './config.js';
+import { formatSpeed, speedUnit } from './dom.js';
+import { cylinderLabel, groupThousands } from './hud.js';
 
 const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const $ = (id) => document.getElementById(id);
+const clamp = (x, a, b) => (x < a ? a : x > b ? b : x);
+const KM_TO_MI = 0.621371;
 
 export const VISUAL_SPEEDS = [
   { value: 1, label: 'Real time' },
@@ -12,6 +17,19 @@ export const VISUAL_SPEEDS = [
   { value: 1 / 25, label: '1/25' },
   { value: 1 / 100, label: '1/100' },
 ];
+
+const INDUCTION_NOTES = {
+  na: 'Natural aspiration: instant throttle response, no boost.',
+  turbo: 'One turbo: lag below about a third of the redline, then a surge. Blow-off valve on lift.',
+  'twin-turbo': 'Two smaller turbos spool sooner, with less lag.',
+  supercharger: 'Belt-driven: boost rises with rpm, no lag, some drive loss.',
+};
+
+const MODE_NOTES = {
+  manual: 'H-pattern: you work the clutch and drag the lever through the gate.',
+  sequential: 'Sequential: tap the paddles (or E / Q). Flat-shift upshifts, automated clutch.',
+  auto: 'Automatic shifts up near the redline and down around 2,000 rpm. The clutch is automated.',
+};
 
 function chips(container, items, selected, onPick) {
   container.replaceChildren(
@@ -28,26 +46,52 @@ function chips(container, items, selected, onPick) {
   );
 }
 
+/** Default high-cam switch point for an engine: about two thirds of the redline. */
+export function defaultVvlRpm(profile) {
+  const lo = profile.idleRpm + 1000;
+  const hi = profile.redlineRpm - 200;
+  return clamp(Math.round((profile.redlineRpm * 0.66) / 100) * 100, lo, hi);
+}
+
+/** Displacement slider range (litres) for a layout: the per-cylinder limits the profile builder accepts. */
+export function displacementRange(profile) {
+  const n = profile.kind === 'rotary' ? profile.rotors : profile.cylinders.length;
+  const [lo, hi] = profile.kind === 'rotary' ? [0.3, 1.0] : [0.12, 1.0];
+  return { min: Math.ceil(n * lo * 10) / 10, max: Math.floor(n * hi * 10) / 10 };
+}
+
 export class SettingsPanel {
   constructor(onChange) {
     this.onChange = onChange;
     this.backdrop = $('settings');
+    this.sheet = this.backdrop.querySelector('.sheet');
+    this.dragging = null;
     this.inputs = {
       idle: $('opt-idle'),
       redline: $('opt-redline'),
       bore: $('opt-bore'),
+      displacement: $('opt-displacement'),
+      vvlRpm: $('opt-vvl-rpm'),
+      boost: $('opt-boost'),
+      launchRpm: $('opt-launch-rpm'),
       ratios: [...document.querySelectorAll('.ratio-grid input[data-gear]')],
       fd: $('opt-fd'),
       tire: $('opt-tire'),
     };
-    const { idle, redline, bore } = this.inputs;
-    idle.addEventListener('input', () => this.emit({ idleRpm: Number(idle.value) }, 'engine'));
-    redline.addEventListener('input', () => this.emit({ redlineRpm: Number(redline.value) }, 'engine'));
-    bore.addEventListener('input', () => this.emit({ boreStroke: Number(bore.value) }, 'engine'));
+    const { idle, redline, bore, displacement, vvlRpm, boost, launchRpm } = this.inputs;
+    this.range(idle, 'opt-idle-out', String, (v) => ({ idleRpm: v }), 'engine');
+    this.range(redline, 'opt-redline-out', String, (v) => ({ redlineRpm: v }), 'engine');
+    // These two rebuild the 3D model, so a drag applies at most a few times a second.
+    this.range(bore, 'opt-bore-out', (v) => v.toFixed(2), (v) => ({ boreStroke: v }), 'engine', 160);
+    this.range(displacement, 'opt-displacement-out', (v) => v.toFixed(1), (v) => ({ displacementL: v }), 'engine', 160);
+    this.range(vvlRpm, 'opt-vvl-rpm-out', String, (v) => ({ vvlRpm: v }), 'engine');
+    this.range(boost, 'opt-boost-out', (v) => v.toFixed(2), (v) => ({ boostBar: v }), 'engine');
+    this.range(launchRpm, 'opt-launch-rpm-out', String, (v) => ({ launchRpm: v }), 'assist');
+
     for (const input of this.inputs.ratios) {
       input.addEventListener('change', () => {
         const v = Number(input.value);
-        if (!(v >= 0.4 && v <= 6)) return this.render(this.settings, this.profile);
+        if (!(v >= 0.4 && v <= 6)) return this.render(this.settings, this.profile, this.drivetrain);
         if (input.dataset.gear === 'R') this.emit({ reverseRatio: v }, 'drive');
         else {
           const gearRatios = [...this.settings.gearRatios];
@@ -59,16 +103,99 @@ export class SettingsPanel {
     this.inputs.fd.addEventListener('change', () => {
       const v = Number(this.inputs.fd.value);
       if (v >= 1.5 && v <= 6) this.emit({ finalDrive: v }, 'drive');
-      else this.render(this.settings, this.profile);
+      else this.render(this.settings, this.profile, this.drivetrain);
     });
     this.inputs.tire.addEventListener('change', () => {
       const v = Number(this.inputs.tire.value);
       if (v >= 40 && v <= 100) this.emit({ tireDiameter: v / 100 }, 'drive');
-      else this.render(this.settings, this.profile);
+      else this.render(this.settings, this.profile, this.drivetrain);
     });
+
+    // Switches.
+    this.switches = {
+      autoBlip: [$('opt-autoblip'), 'assist'],
+      launchControl: [$('opt-launch'), 'assist'],
+      tractionControl: [$('opt-tc'), 'assist'],
+      strokeGases: [$('opt-strokes'), 'view'],
+      valvetrain: [$('opt-valvetrain'), 'view'],
+      xray: [$('opt-xray'), 'view'],
+      cutaway: [$('opt-cutaway'), 'view'],
+    };
+    for (const [key, [btn, kind]] of Object.entries(this.switches)) {
+      btn.addEventListener('click', () => this.emit({ [key]: !this.settings[key] }, kind));
+    }
+    $('opt-vvl').addEventListener('click', () => {
+      this.emit({ vvlRpm: this.profile.vvlRpm ? null : defaultVvlRpm(this.profile) }, 'engine');
+    });
+
+    // Fixed chip groups.
+    this.choices = {
+      induction: [$('opt-induction'), 'engine'],
+      mode: [$('opt-mode'), 'mode'],
+      cluster: [$('opt-cluster'), 'hud'],
+      units: [$('opt-units'), 'hud'],
+      quality: [$('opt-quality'), 'view'],
+    };
+    for (const [key, [group, kind]] of Object.entries(this.choices)) {
+      for (const b of group.querySelectorAll('.chip')) b.addEventListener('click', () => this.emit({ [key]: b.dataset.value }, kind));
+    }
+
+    // Section shortcuts scroll the sheet; the chip for the section in view lights up.
+    this.navChips = [...this.backdrop.querySelectorAll('.nav-chip')];
+    for (const chip of this.navChips) {
+      chip.addEventListener('click', () => {
+        const target = $(chip.dataset.target);
+        const top = this.backdrop.querySelector('.sheet-top');
+        if (target) this.sheet.scrollTo({ top: target.offsetTop - (top?.offsetHeight ?? 0) - 6, behavior: 'smooth' });
+      });
+    }
+    this.sheet.addEventListener('scroll', () => this.markSection(), { passive: true });
+
+    $('opt-garage').addEventListener('click', () => this.onGarage?.());
     this.backdrop.addEventListener('pointerdown', (e) => {
       if (e.target === this.backdrop) this.close();
     });
+  }
+
+  /** Bind a range input: live label on input, apply immediately or throttled (ms), and on release. */
+  range(input, outId, format, toPatch, kind, throttle = 0) {
+    const out = $(outId);
+    let timer = 0;
+    const push = () => {
+      timer = 0;
+      this.emit(toPatch(Number(input.value)), kind);
+    };
+    input.addEventListener('pointerdown', () => (this.dragging = input));
+    input.addEventListener('pointerup', () => (this.dragging = null));
+    input.addEventListener('input', () => {
+      out.textContent = format(Number(input.value));
+      if (!throttle) push();
+      else if (!timer) timer = setTimeout(push, throttle);
+    });
+    input.addEventListener('change', () => {
+      this.dragging = null;
+      if (!throttle) return;
+      clearTimeout(timer);
+      push();
+    });
+  }
+
+  /** Set a slider without fighting a thumb that is being dragged. */
+  setRange(input, outId, value, text) {
+    if (this.dragging !== input) input.value = value;
+    if (this.dragging !== input) $(outId).textContent = text;
+  }
+
+  markSection() {
+    const y = this.sheet.scrollTop + (this.backdrop.querySelector('.sheet-top')?.offsetHeight ?? 0) + 24;
+    let active = this.navChips[0];
+    for (const chip of this.navChips) {
+      const sec = $(chip.dataset.target);
+      if (sec && sec.offsetTop <= y) active = chip;
+    }
+    if (active === this.activeChip) return;
+    this.activeChip = active;
+    for (const chip of this.navChips) chip.classList.toggle('is-active', chip === active);
   }
 
   emit(patch, kind) {
@@ -82,6 +209,7 @@ export class SettingsPanel {
   open() {
     this.backdrop.hidden = false;
     $('btn-settings').setAttribute('aria-expanded', 'true');
+    this.markSection();
   }
 
   close() {
@@ -92,40 +220,66 @@ export class SettingsPanel {
   render(settings, profile, drivetrain) {
     this.settings = settings;
     this.profile = profile;
+    if (drivetrain) this.drivetrain = drivetrain;
+    const units = settings.units;
+
+    // Garage shortcut.
+    $('opt-garage-note').textContent = this.garageName?.(settings.garage) ? `Loaded: ${this.garageName(settings.garage)}` : 'Ready-made engine builds';
+
+    // Engine.
     chips($('opt-preset'), PRESET_ORDER.map((id) => ({ value: id, label: PRESETS[id].label })), settings.preset, (id) => {
-      const def = PRESETS[id];
-      const cylinders = def.family === 'v' ? (id === 'v6' ? 6 : 8) : def.count;
-      this.emit({ preset: id, cylinders, redlineRpm: null }, 'engine');
+      this.emit({ preset: id, cylinders: PRESETS[id].count, redlineRpm: null, displacementL: null, garage: null }, 'engine');
     });
     $('opt-preset-note').textContent = `${profile.name} · ${profile.layoutNote} · firing ${firingOrderLabel(profile)}`;
 
-    const def = PRESETS[settings.preset];
+    const def = PRESETS[settings.preset] ?? PRESETS['v8-cross'];
     const count = profile.kind === 'rotary' ? profile.rotors : profile.cylinders.length;
-    const unit = def.family === 'rotary' ? 'rotor' : '';
-    chips($('opt-cylinders'), def.counts.map((n) => ({
-      value: n,
-      label: def.family === 'rotary' ? `${n} ${unit}${n > 1 ? 's' : ''}` : def.family === 'v' ? `V${n}` : `I${n}`,
-    })), count, (n) => this.emit({ cylinders: n, redlineRpm: null }, 'engine'));
+    chips($('opt-cylinders'), def.counts.map((n) => ({ value: n, label: cylinderLabel(def.family, n) })), count,
+      (n) => this.emit({ cylinders: n, redlineRpm: null, displacementL: null, garage: null }, 'engine'));
 
-    const { idle, redline, bore } = this.inputs;
-    idle.value = profile.idleRpm;
-    $('opt-idle-out').textContent = profile.idleRpm;
-    redline.value = profile.redlineRpm;
-    $('opt-redline-out').textContent = profile.redlineRpm;
-    bore.value = profile.boreStroke;
-    $('opt-bore-out').textContent = profile.boreStroke.toFixed(2);
+    const { idle, redline, bore, displacement, vvlRpm, boost, launchRpm } = this.inputs;
+    const dr = displacementRange(profile);
+    displacement.min = dr.min;
+    displacement.max = dr.max;
+    this.setRange(displacement, 'opt-displacement-out', profile.displacementL.toFixed(1), profile.displacementL.toFixed(1));
+    this.setRange(idle, 'opt-idle-out', profile.idleRpm, String(profile.idleRpm));
+    this.setRange(redline, 'opt-redline-out', profile.redlineRpm, String(profile.redlineRpm));
+    this.setRange(bore, 'opt-bore-out', profile.boreStroke, profile.boreStroke.toFixed(2));
     const shape = profile.boreStroke > 1.03 ? 'Oversquare' : profile.boreStroke < 0.97 ? 'Undersquare' : 'Square';
     const pistonSpeed = (2 * (profile.strokeMm / 1000) * profile.redlineRpm) / 60;
     $('opt-bore-note').textContent = profile.kind === 'rotary'
       ? 'Rotaries have no bore or stroke; this only shifts the torque curve.'
-      : `${shape} · ${profile.boreMm.toFixed(1)} × ${profile.strokeMm.toFixed(1)} mm · ${profile.displacementL.toFixed(1)} L · ${pistonSpeed.toFixed(1)} m/s piston speed at redline`;
+      : `${shape} · ${profile.boreMm.toFixed(1)} × ${profile.strokeMm.toFixed(1)} mm · ${pistonSpeed.toFixed(1)} m/s piston speed at redline`;
 
-    chips($('opt-visual'), VISUAL_SPEEDS, settings.visualSpeed, (v) => this.emit({ visualSpeed: v }, 'view'));
-    for (const b of $('opt-mode').querySelectorAll('.chip')) {
-      b.setAttribute('aria-checked', String(b.dataset.value === settings.mode));
-      b.onclick = () => this.emit({ mode: b.dataset.value }, 'mode');
+    // Variable valve lift (piston engines only).
+    $('opt-vvl-block').hidden = profile.kind === 'rotary';
+    const vvlOn = !!profile.vvlRpm;
+    $('opt-vvl').setAttribute('aria-checked', String(vvlOn));
+    $('opt-vvl-field').hidden = !vvlOn;
+    vvlRpm.min = profile.idleRpm + 1000;
+    vvlRpm.max = profile.redlineRpm - 200;
+    if (vvlOn) this.setRange(vvlRpm, 'opt-vvl-rpm-out', profile.vvlRpm, String(profile.vvlRpm));
+
+    // Forced induction.
+    const induction = profile.induction?.kind ?? settings.induction;
+    $('opt-induction-note').textContent = INDUCTION_NOTES[induction] ?? '';
+    $('opt-boost-field').hidden = induction === 'na';
+    this.setRange(boost, 'opt-boost-out', settings.boostBar, Number(settings.boostBar).toFixed(2));
+
+    // Transmission and assists.
+    $('opt-mode-note').textContent = MODE_NOTES[settings.mode] ?? '';
+    $('opt-autoblip-row').hidden = settings.mode === 'auto';
+    $('opt-launch-field').hidden = !settings.launchControl;
+    this.setRange(launchRpm, 'opt-launch-rpm-out', settings.launchRpm, String(settings.launchRpm));
+
+    for (const [key, [btn]] of Object.entries(this.switches)) btn.setAttribute('aria-checked', String(!!settings[key]));
+    for (const [key, [group]] of Object.entries(this.choices)) {
+      const value = key === 'induction' ? induction : settings[key];
+      for (const b of group.querySelectorAll('.chip')) b.setAttribute('aria-checked', String(b.dataset.value === value));
     }
+    chips($('opt-visual'), VISUAL_SPEEDS, settings.visualSpeed, (v) => this.emit({ visualSpeed: v }, 'view'));
 
+    // Gearing.
     chips($('opt-ratio-presets'), Object.entries(GEAR_RATIO_PRESETS).map(([k, v]) => ({ value: k, label: v.label })), this.matchPreset(settings), (k) => {
       const p = GEAR_RATIO_PRESETS[k];
       this.emit({ gearRatios: [...p.gearRatios], reverseRatio: p.reverseRatio, finalDrive: p.finalDrive }, 'drive');
@@ -135,10 +289,12 @@ export class SettingsPanel {
     });
     this.inputs.fd.value = settings.finalDrive.toFixed(2);
     this.inputs.tire.value = (settings.tireDiameter * 100).toFixed(1);
-    if (drivetrain) {
-      const top = drivetrain.speedForRpm(profile.redlineRpm, settings.gearRatios.length);
-      const first = drivetrain.speedForRpm(profile.redlineRpm, 1);
-      $('opt-gearing-note').textContent = `Tyre circumference ${(Math.PI * settings.tireDiameter).toFixed(2)} m · at redline 1st tops out at ${first.toFixed(0)} km/h, 5th at ${top.toFixed(0)} km/h.`;
+    const dt = this.drivetrain;
+    if (dt) {
+      const top = formatSpeed(dt.speedForRpm(profile.redlineRpm, settings.gearRatios.length), units);
+      const first = formatSpeed(dt.speedForRpm(profile.redlineRpm, 1), units);
+      const unit = speedUnit(units);
+      $('opt-gearing-note').textContent = `Tyre circumference ${(Math.PI * settings.tireDiameter).toFixed(2)} m · at redline 1st tops out at ${first} ${unit}, 5th at ${top} ${unit}.`;
     }
   }
 
@@ -147,6 +303,80 @@ export class SettingsPanel {
       if (p.finalDrive === s.finalDrive && p.reverseRatio === s.reverseRatio && p.gearRatios.every((r, i) => r === s.gearRatios[i])) return k;
     }
     return null;
+  }
+}
+
+// ── Garage sheet ────────────────────────────────────────────────────────────
+
+const span = (cls, text) => {
+  const n = document.createElement('span');
+  n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
+};
+
+/** Cards for the ready-made builds. specsOf(entry) → garageSpecs(); onPick(id) loads one. */
+export class GarageSheet {
+  constructor({ entries, specsOf, onPick }) {
+    this.entries = entries;
+    this.specsOf = specsOf;
+    this.onPick = onPick;
+    this.backdrop = $('garage');
+    this.list = $('garage-list');
+    this.cards = null;
+    $('btn-garage-close').addEventListener('click', () => this.close());
+    this.backdrop.addEventListener('pointerdown', (e) => {
+      if (e.target === this.backdrop) this.close();
+    });
+  }
+
+  get isOpen() {
+    return !this.backdrop.hidden;
+  }
+
+  build() {
+    this.cards = this.entries.map((entry) => {
+      const s = this.specsOf(entry);
+      const card = document.createElement('button');
+      card.type = 'button';
+      card.className = 'garage-card';
+      card.dataset.id = entry.id;
+      const boost = s.induction === 'na' ? 'NA' : `${s.inductionLabel} ${s.boostBar.toFixed(1)} bar`;
+      const head = span('gc-head');
+      head.append(span('gc-name', entry.name), span('gc-current', 'Fitted'));
+      const tags = span('gc-tags');
+      tags.append(span('gc-tag', s.layout), span('gc-tag', `${s.displacementL.toFixed(1)} L`), span(`gc-tag${s.induction === 'na' ? '' : ' is-boost'}`, boost));
+      if (s.vvl) tags.append(span('gc-tag', 'VVL'));
+      const stat = (value, unit, sub) => {
+        const n = span('gc-stat');
+        const v = span('gc-value');
+        v.append(document.createTextNode(value), span('gc-unit', unit));
+        n.append(v, span('gc-sub', sub));
+        return n;
+      };
+      const stats = span('gc-stats');
+      stats.append(
+        stat(String(s.peakHp), 'hp', `@ ${groupThousands(s.peakHpRpm)}`),
+        stat(String(s.peakNm), 'Nm', `@ ${groupThousands(s.peakNmRpm)}`),
+        stat(groupThousands(s.redlineRpm), 'rpm', 'redline'),
+      );
+      card.append(head, tags, span('gc-blurb', entry.blurb), stats);
+      card.setAttribute('aria-label', `${entry.name}: ${s.layout}, ${s.displacementL.toFixed(1)} litres, ${s.peakHp} hp, ${s.peakNm} Nm, redline ${s.redlineRpm} rpm, ${s.inductionLabel}`);
+      card.addEventListener('click', () => this.onPick(entry.id));
+      return card;
+    });
+    this.list.replaceChildren(...this.cards);
+  }
+
+  open(currentId) {
+    if (!this.cards) this.build();
+    for (const c of this.cards) c.setAttribute('aria-current', String(c.dataset.id === currentId));
+    this.backdrop.hidden = false;
+    this.list.parentElement.scrollTop = 0;
+  }
+
+  close() {
+    this.backdrop.hidden = true;
   }
 }
 
@@ -327,6 +557,17 @@ export class TelemetryPanel {
       });
     }
     this.lastListKey = '';
+    this.units = 'kmh';
+  }
+
+  /** Speed and distance units for the tiles: 'kmh' | 'mph'. */
+  setUnits(units) {
+    this.units = units === 'mph' ? 'mph' : 'kmh';
+    const mph = this.units === 'mph';
+    $('t-top-speed-unit').textContent = speedUnit(this.units);
+    $('t-distance-unit').textContent = mph ? 'mi' : 'km';
+    // The session timer measures 0–100 km/h, which is 0–62 mph.
+    $('t-zero-label').textContent = mph ? '0–62 mph' : '0–100 km/h';
   }
 
   get isOpen() {
@@ -398,9 +639,9 @@ export class TelemetryPanel {
     $('t-torque-now').textContent = Math.round(torqueNow);
     $('t-power-now').textContent = Math.round(powerNow);
     $('t-peak-rpm').textContent = Math.round(stats.peakRpm).toLocaleString('en-US');
-    $('t-top-speed').textContent = Math.round(stats.topSpeedKmh);
+    $('t-top-speed').textContent = formatSpeed(stats.topSpeedKmh, this.units);
     $('t-zero-100').textContent = stats.bestZeroToHundred ? stats.bestZeroToHundred.toFixed(2) : '—';
-    $('t-distance').textContent = (stats.distanceM / 1000).toFixed(2);
+    $('t-distance').textContent = ((stats.distanceM / 1000) * (this.units === 'mph' ? KM_TO_MI : 1)).toFixed(2);
 
     const avg = tracker.averageScore;
     $('t-shift-avg').textContent = avg === null ? '—' : String(avg);
