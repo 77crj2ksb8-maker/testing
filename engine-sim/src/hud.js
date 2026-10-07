@@ -431,6 +431,8 @@ export class Hud {
     this.rpmQ = -1;
     this.speedQ = -1;
     this.gearShown = '';
+    this.gearKey = null;
+    this.gearText = 'N';
     this.wide = false;
     this.hot = false;
     this.redlineShown = 0;
@@ -552,6 +554,10 @@ export class Hud {
     const el = this.el;
     const rpm = sim.rpm;
     const gear = sim.gear;
+    if (gear !== this.gearKey) {
+      this.gearKey = gear;
+      this.gearText = String(gear);
+    }
     const speed = formatSpeed(sim.speedKmh, settings.units);
     const limiter = !!sim.fuelCut && !sim.launchActive;
 
@@ -572,7 +578,7 @@ export class Hud {
 
     if (this.analog) {
       const mode = settings.mode === 'auto' ? 'AUTO' : settings.mode === 'sequential' ? 'SEQ' : '';
-      this.dial.update(rpm, profile.redlineRpm, String(gear), speed, settings.units, (limiter ? 1 : 0) | (spinning ? 2 : 0), mode);
+      this.dial.update(rpm, profile.redlineRpm, this.gearText, speed, settings.units, (limiter ? 1 : 0) | (spinning ? 2 : 0), mode);
     } else {
       const rpmQ = Math.round(rpm / 10);
       if (rpmQ !== this.rpmQ) {
@@ -602,7 +608,7 @@ export class Hud {
       }
       if (this.gearShown !== gear) {
         this.gearShown = gear;
-        el.gear.textContent = String(gear);
+        el.gear.textContent = this.gearText;
         el.gear.classList.toggle('is-reverse', gear === 'R');
       }
       if (speed !== this.speedQ) {

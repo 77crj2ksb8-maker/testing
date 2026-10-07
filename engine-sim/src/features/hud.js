@@ -233,6 +233,13 @@ export default {
         root.setProperty('--toast-max', `${Math.round(w - 2 * (14 + railW + 8))}px`);
       }
       root.setProperty('--toast-top', `${Math.round(toastTop)}px`);
+      if (landscape) {
+        const railRect = rail.getBoundingClientRect();
+        const leftEdge = Math.max(tachRect.right, lever.right) + 12;
+        const rightEdge = Math.min(right.left, railRect.width ? railRect.left : right.left, pedals.left) - 12;
+        root.setProperty('--centre-l', `${Math.round(leftEdge)}px`);
+        root.setProperty('--centre-r', `${Math.round(w - rightEdge)}px`);
+      }
       // Landscape: centred in the free middle column. Portrait: kept clear of the lever and pedals.
       const stallTop = landscape
         ? Math.max(toastTop + TOAST_SLOT, h / 2 - 95)

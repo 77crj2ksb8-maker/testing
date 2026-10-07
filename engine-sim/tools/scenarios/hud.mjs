@@ -135,6 +135,7 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
       });
       const text = document.getElementById('rpm').textContent;
       Object.assign(s, saved);
+      a.hud.spinHold = 0;
       return { text, tachRight: tach.right - 8, rows };
     });
     expect(fit.text === '10480' && fit.rows.every((r) => !r.overflow && r.right <= fit.tachRight + 0.5),
@@ -218,6 +219,17 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
   });
   await settle();
   expect(!(await evaluate(() => document.getElementById('shifter').hidden)), 'H-pattern brings the lever back');
+
+  // ── Telemetry panel stays clear of the HUD chrome in landscape ────────────
+  await page.setViewportSize({ width: 844, height: 390 });
+  await settle();
+  await tap('#btn-telemetry');
+  await settle();
+  await checkLayout('telemetry landscape', ['#telemetry']);
+  await shot('hud-telemetry-landscape');
+  await tap('#btn-telemetry');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await settle();
 
   // ── Units ────────────────────────────────────────────────────────────────
   await evaluate(() => window.__app.apply({ units: 'mph' }, 'hud'));

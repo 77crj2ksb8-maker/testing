@@ -198,7 +198,7 @@ output { font-variant-numeric: tabular-nums; }
 
 /* Gauges and assist pills under the tach. */
 .gauges { display: flex; flex-wrap: wrap; gap: 6px 10px; }
-.gauge { flex: 1 1 0; min-width: max-content; display: flex; flex-direction: column; gap: 2px; }
+.gauge { flex: 1 1 0; min-width: max-content; max-width: calc(50% - 5px); display: flex; flex-direction: column; gap: 2px; }
 .gauge-label { font-size: 9.5px; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--muted); }
 .gauge-read { display: flex; align-items: baseline; gap: 2px; white-space: nowrap; }
 .gauge-value { font-size: 15px; font-weight: 700; line-height: 1.05; }
@@ -873,7 +873,8 @@ output { font-variant-numeric: tabular-nums; }
   .tach-dial { height: 126px; }
   .tach { width: 252px; }
   .hud-extra { margin-top: 6px; }
-  .telemetry { top: calc(var(--safe-top) + 10px); left: 50%; right: auto; width: min(460px, calc(100% - 2 * 260px)); transform: translateX(-50%); bottom: calc(var(--safe-bottom) + 10px); }
+  /* The free centre column between the tach + lever and the rail + pedals (set from JS). */
+  .telemetry { top: calc(var(--safe-top) + 10px); left: var(--centre-l, 280px); right: var(--centre-r, 280px); max-width: none; margin: 0; bottom: calc(var(--safe-bottom) + 10px); }
   .pedal { height: 96px; }
   .pedal-gas { height: 108px; }
   .pedal-brake { height: 78px; }
