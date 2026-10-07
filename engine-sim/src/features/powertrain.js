@@ -1,5 +1,5 @@
-// Powertrain feature: light-touch feedback for notable engine events (blown,
-// overheating, over-rev, high cam, two-step armed, refused sequential shifts),
+// Powertrain feature: light-touch feedback for notable engine events
+// (overheating, over-rev, high cam, two-step armed, refused sequential shifts),
 // a fresh engine when a different build is fitted to a blown car, and
 // app.actions.loadGarage(id).
 // The physics itself lives in src/physics.js, src/induction.js and src/thermal.js.
@@ -22,26 +22,21 @@ export default {
     let lastLaunchToast = -Infinity;
     let launchWasArmed = false;
     let blownProfileId = null;
-    let peakRpm = 0; // highest rpm of the current over-rev episode
+    let overrevPeak = 0; // highest rpm of the over-rev episode in progress (0 = none)
 
-    // The core stall card already says the engine is destroyed and offers the
-    // rebuild; the toast adds what killed it.
-    bus.on('blown', (e) => {
+    // No toast: the core stall card already covers a blown engine (and a
+    // toast would sit on top of it in landscape). sim.blownCause says why.
+    bus.on('blown', () => {
       blownProfileId = app.profile.id;
-      const why = e.cause === 'overheat'
-        ? `Blown: coolant hit ${Math.round(sim.coolantC)} °C`
-        : `Blown at ${fmtRpm(Math.max(peakRpm, sim.rpm))} rpm`;
-      app.toast(why, 'bad', 3600);
       navigator.vibrate?.([80, 40, 160]);
     });
     bus.on('overheat', (e) => {
       if (!sim.blown) app.toast(`Overheating at ${Math.round(e.coolantC)} °C. Ease off to let it cool.`, 'warn', 3200);
     });
+    // Over-rev is reported once the episode is over (peak rpm and the damage
+    // it did), and not at all when it ended in a blow-up.
     bus.on('overrev', (e) => {
-      peakRpm = Math.max(peakRpm, e.rpm);
-      if (sim.blown || e.severity < 0.15 || sim.time - lastOverrevToast < OVERREV_TOAST_GAP) return;
-      lastOverrevToast = sim.time;
-      app.toast(`Over-rev: ${fmtRpm(e.rpm)} rpm. That hurt the engine.`, 'bad', 2400);
+      overrevPeak = Math.max(overrevPeak, e.rpm);
     });
     bus.on('vvl', (e) => {
       if (!e.on || sim.time - lastVvlToast < VVL_TOAST_GAP) return;
@@ -77,8 +72,17 @@ export default {
 
     return {
       afterStep() {
-        if (sim.rpm > peakRpm && peakRpm > 0) peakRpm = sim.rpm;
-        else if (sim.rpm < app.profile.redlineRpm) peakRpm = 0;
+        if (overrevPeak > 0) {
+          overrevPeak = Math.max(overrevPeak, sim.rpm);
+          if (sim.blown) overrevPeak = 0;
+          else if (sim.rpm < app.profile.redlineRpm) {
+            if (sim.time - lastOverrevToast > OVERREV_TOAST_GAP) {
+              lastOverrevToast = sim.time;
+              app.toast(`Over-revved to ${fmtRpm(overrevPeak)} rpm. Engine health ${Math.round(100 * (1 - sim.damage))} %.`, 'bad', 2800);
+            }
+            overrevPeak = 0;
+          }
+        }
         const armed = sim.launchArmed && sim.throttleInput > 0.3;
         if (armed && !launchWasArmed && sim.time - lastLaunchToast > LAUNCH_TOAST_GAP) {
           lastLaunchToast = sim.time;
