@@ -348,7 +348,10 @@ const CSS = `
 .mo-peaks .tile-value { font-size: 20px; }
 .mo-peaks .tile-at { display: block; font-family: var(--font-data); font-size: 11px; color: var(--muted); }
 .mo-chart { height: 112px; }
-.mo-key { display: inline-block; width: 14px; height: 0; margin: 0 4px 2px 0; vertical-align: middle; border-top: 2px solid currentColor; }
+.mo-chart-box { min-width: 0; }
+.mo-dyno .chart-readout { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.mo-legend { margin: 4px 0 2px; display: flex; justify-content: flex-end; align-items: center; gap: 6px; font-family: var(--font-data); font-size: 11px; color: var(--muted); }
+.mo-key { display: inline-block; width: 16px; height: 0; margin-left: 8px; border-top: 2px solid var(--muted); }
 .mo-key.is-dash { border-top-style: dashed; }
 .mo-note { margin: 6px 0 0; font-size: 12px; color: var(--muted); line-height: 1.4; }
 .mo-runs { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
@@ -362,7 +365,7 @@ const CSS = `
 .mo-section h3 .mo-tag { margin-left: 6px; font-family: var(--font-data); font-size: 10px; font-weight: 500; color: var(--muted); }
 .mo-pv-row { display: grid; grid-template-columns: 1fr; gap: 0 14px; }
 @media (min-width: 640px) { .mo-pv-row { grid-template-columns: 1fr 1fr; } }
-.mo-chart-pv { height: 128px; }
+.mo-chart-pv { height: 112px; }
 @media (min-width: 640px) { .mo-chart-pv { height: 150px; } }
 .mo-ach-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .mo-ach-list li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; padding: 7px 9px; border-radius: 9px; background: var(--raise); min-width: 0; }
@@ -400,7 +403,13 @@ const CSS = `
     width: min(440px, 56%);
     max-height: none;
   }
-  .mo-chart { height: 96px; }
+  .mo-chart { height: 100px; }
+  .mo-dyno { padding: 10px 12px 12px; }
+  .mo-dyno .panel-head { margin-bottom: 4px; }
+  .mo-progress { margin: 6px 0 8px; }
+  .mo-peaks .tile { padding: 6px 10px; }
+  .mo-peaks .tile-value { font-size: 17px; }
+  .mo-charts { display: grid; grid-template-columns: 1fr 1fr; gap: 0 12px; }
 }
 `;
 
@@ -683,17 +692,16 @@ export default {
       const nm = tile('Peak torque');
       hp.unit.textContent = 'hp';
       nm.unit.textContent = 'Nm';
-      const head = (title, unit, color) => {
+      const head = (title, unit) => {
         const readout = el('p', { class: 'chart-readout' });
-        const legend = el('p', { class: 'chart-readout', style: { color } },
-          el('span', { class: 'mo-key' }), el('span', { text: 'measured  ', style: { color: 'var(--muted)' } }),
-          el('span', { class: 'mo-key is-dash' }), el('span', { text: 'rated', style: { color: 'var(--muted)' } }));
-        return { node: el('div', { class: 'chart-head' }, el('h3', {}, title, ' ', el('span', { class: 'chart-unit', text: unit })), readout, legend), readout };
+        return { node: el('div', { class: 'chart-head' }, el('h3', {}, title, ' ', el('span', { class: 'chart-unit', text: unit })), readout), readout };
       };
-      const tHead = head('Torque', 'Nm', 'var(--series-torque)');
-      const pHead = head('Power', 'hp', 'var(--series-power)');
+      const tHead = head('Torque', 'Nm');
+      const pHead = head('Power', 'hp');
       const tCanvas = el('canvas', { class: 'chart mo-chart', 'aria-label': 'Measured and rated torque against engine speed' });
       const pCanvas = el('canvas', { class: 'chart mo-chart', 'aria-label': 'Measured and rated power against engine speed' });
+      const legend = el('p', { class: 'mo-legend', 'aria-hidden': 'true' },
+        el('span', { class: 'mo-key' }), 'measured', el('span', { class: 'mo-key is-dash' }), 'rated');
       const note = el('p', { class: 'mo-note' });
       const runs = el('ol', { class: 'mo-runs', 'aria-label': 'Last pulls' });
       const root = el('section', { class: 'mo-card panel mo-dyno scrollable', hidden: true, role: 'dialog', 'aria-label': 'Dyno' },
@@ -701,7 +709,11 @@ export default {
         el('div', { class: 'mo-dyno-bar' }, msg, run),
         el('div', { class: 'mo-progress', 'aria-hidden': 'true' }, bar),
         el('div', { class: 'mo-peaks' }, hp.node, nm.node),
-        tHead.node, tCanvas, pHead.node, pCanvas, note, runs);
+        legend,
+        el('div', { class: 'mo-charts' },
+          el('div', { class: 'mo-chart-box' }, tHead.node, tCanvas),
+          el('div', { class: 'mo-chart-box' }, pHead.node, pCanvas)),
+        note, runs);
       const ui = {
         root, sub, msg, run, bar, hp, nm, tHead, pHead, note, runs,
         torque: new Plot(tCanvas), power: new Plot(pCanvas),
