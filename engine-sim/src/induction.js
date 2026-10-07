@@ -21,6 +21,7 @@ export const BOOST_TORQUE_GAIN = 0.85;
 export const BOV_MIN_BAR = 0.3;
 const BOV_COOLDOWN = 0.6; // s
 const MANIFOLD_TAU = 0.04; // s, plenum filling
+const EXHAUST_TAU = 0.25; // s, smoothing of the fuelling that drives the turbine
 const SC_DRIVE_LOSS = 0.2; // supercharger drive torque per bar, as a fraction of peak NA torque
 
 // threshold: rpm / redline where a turbo reaches full boost at wide-open
@@ -92,6 +93,7 @@ export class Induction {
     this.parasitic = 0;
     this.bovArmed = false;
     this.bovCooldown = 0;
+    this.exhaustLoad = 0; // smoothed fuelling (0..1): exhaust energy available to the turbine
   }
 
   get boostTarget() {
@@ -100,13 +102,17 @@ export class Induction {
 
   /**
    * Advance by h seconds. plate: throttle plate opening incl. the idle valve
-   * (0..1). Returns the charge pressure vented by the blow-off valve this step
-   * (bar), or 0.
+   * (0..1). fueling: plate opening that is actually burning fuel (0 during a
+   * fuel or ignition cut). Returns the charge pressure vented by the blow-off
+   * valve this step (bar), or 0.
    */
-  update(h, rpm, redlineRpm, plate, running, peakNaTorqueNm) {
+  update(h, rpm, redlineRpm, plate, running, peakNaTorqueNm, fueling = plate) {
     const s = this.spec;
     const u = rpm / redlineRpm;
     let vented = 0;
+    // A free-revving engine bouncing off the limiter burns little fuel, so the
+    // turbine sees far less exhaust energy than under load.
+    this.exhaustLoad += ((running ? fueling : 0) - this.exhaustLoad) * (1 - Math.exp(-h / EXHAUST_TAU));
     if (!s.boosted) {
       this.chargeBar = 0;
       this.turboRpm = 0;
@@ -114,7 +120,8 @@ export class Induction {
     } else if (s.turbo) {
       // Exhaust energy spins the shaft; the wastegate stops it at target boost.
       const idleSpin = running ? 0.08 + 0.12 * clamp(u, 0, 1) : 0;
-      const want = running ? Math.max(idleSpin, Math.sqrt(boostCapacity(this.kind, u)) * Math.pow(plate, 0.6)) : 0;
+      const energy = 0.3 + 0.7 * clamp(this.exhaustLoad, 0, 1);
+      const want = running ? Math.max(idleSpin, Math.sqrt(boostCapacity(this.kind, u) * energy) * Math.pow(plate, 0.6)) : 0;
       const tau = want > this.spool ? s.tauUp : s.tauDown;
       this.spool += (want - this.spool) * (1 - Math.exp(-h / tau));
       this.chargeBar = this.targetBar * this.spool * this.spool;

@@ -344,7 +344,7 @@ export class Drivetrain {
     }
 
     // Forced induction.
-    const vented = this.induction.update(h, rpm, p.redlineRpm, plate, this.running, p.peakTorqueNm);
+    const vented = this.induction.update(h, rpm, p.redlineRpm, plate, this.running, p.peakTorqueNm, this.fuelCut ? 0 : thr);
     if (vented > 0) this.events.push({ type: 'bov', boostBar: vented });
     this.boostBar = this.induction.boostBar;
     this.turboRpm = this.induction.turboRpm;
