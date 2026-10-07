@@ -7,16 +7,18 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import {
-  DEG, cylinderPose, combustionFlash, degreesSinceFiring, epitrochoid, rotorPose, rotorDegreesSinceFiring,
+  DEG, cylinderPose, combustionFlash, degreesSinceFiring, rotorPose, rotorDegreesSinceFiring,
 } from './kinematics.js';
 import { makeMaterials, makeXrayMaterial, radialGlowTexture } from './scene/materials.js';
 import {
-  Z_AXIS, cylAlongZ, gearGeometry, crankWebGeometry, merge, withEdges, roundedBox, setRotZ,
+  cylAlongZ, crankWebGeometry, merge, withEdges, roundedBox, setRotZ,
 } from './scene/geometry.js';
 import {
   layoutOf, bankList, exhaustSide, bankToEngine, cylinderPlacement, explodeOffset, headDims,
 } from './scene/layout.js';
 import { buildValvetrain } from './scene/valvetrain.js';
+import { buildRotary } from './scene/rotary.js';
+import { buildDriveline, drivelineDims } from './scene/driveline.js';
 import { GasVolumes } from './scene/gases.js';
 import { planExhaust, ExhaustSystem } from './scene/exhaust.js';
 import { Induction } from './scene/induction3d.js';
@@ -36,17 +38,6 @@ function deviceCaps() {
     cores: navigator.hardwareConcurrency || 4,
     coarse: typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches,
   };
-}
-
-// Gearbox layout shared by the driveline and the exhaust that runs past it.
-function drivelineDims(back, drive) {
-  const fwZ = back - 0.2;
-  const z0 = fwZ - 0.75;
-  const spacing = 0.3;
-  const pairs = drive.gearRatios.length + 1;
-  const boxLen = spacing * (pairs + 1) + 0.5;
-  const caseFront = z0 + 0.15;
-  return { fwZ, z0, spacing, boxLen, caseFront, outputEnd: z0 - boxLen - 0.55, C: 0.82 };
 }
 
 export class EngineView {
@@ -167,11 +158,11 @@ export class EngineView {
     this.blown = null;
     this.effects.clear();
 
-    if (profile.kind === 'rotary') this.buildRotary(profile);
+    if (profile.kind === 'rotary') buildRotary(this, profile);
     else this.buildPiston(profile);
     this.dl = drivelineDims(this.geom.back, drive);
     this.buildBreathing();
-    this.buildDriveline(profile, drive);
+    buildDriveline(this, drive);
     this.buildFailureProps();
     this.scene.add(this.root);
 
@@ -419,143 +410,6 @@ export class EngineView {
     this.pointsFor(n, B);
   }
 
-  buildRotary(p) {
-    const M = this.M;
-    const R = 1.05;
-    const e = 0.15;
-    const W = 0.8;
-    const gap = 0.16;
-    const n = p.rotors;
-    const total = n * W + (n + 1) * gap;
-    const half = total / 2;
-    const B = 0.9;
-    const pulleyZ = half + 0.42;
-    this.geom = { R, e, W, front: half, back: -half, B, pulleyZ, pulleyR: 0.4, chainZ: half };
-
-    // Rotate the core so the bore's long axis stands vertical, plugs on −X and ports on +X.
-    const core = new THREE.Group();
-    core.rotation.z = -Math.PI / 2;
-    this.engine.add(core);
-
-    const bore = [];
-    const outer = [];
-    for (let i = 0; i < 96; i++) {
-      const t = (i / 96) * Math.PI * 2;
-      const [x, y] = epitrochoid(t, R, e);
-      bore.push(new THREE.Vector2(x, y));
-      const [ox, oy] = epitrochoid(t, R + 0.32, e * 0.6);
-      outer.push(new THREE.Vector2(ox, oy));
-    }
-    const housingShape = new THREE.Shape(outer);
-    housingShape.holes.push(new THREE.Path(bore.slice().reverse()));
-    const housingGeo = new THREE.ExtrudeGeometry(housingShape, { depth: W, bevelEnabled: false });
-    housingGeo.translate(0, 0, -W / 2);
-    const plateGeo = new THREE.ExtrudeGeometry(new THREE.Shape(outer), { depth: gap, bevelEnabled: false });
-    plateGeo.translate(0, 0, -gap / 2);
-
-    // Rotor: three apexes joined by convex flanks.
-    const rotorShape = new THREE.Shape();
-    const apex = (k) => [R * 0.985 * Math.cos((k * 2 * Math.PI) / 3), R * 0.985 * Math.sin((k * 2 * Math.PI) / 3)];
-    const [x0, y0] = apex(0);
-    rotorShape.moveTo(x0, y0);
-    for (let k = 0; k < 3; k++) {
-      const [x1, y1] = apex(k + 1);
-      const mid = ((k + 0.5) * 2 * Math.PI) / 3;
-      rotorShape.quadraticCurveTo(0.8 * R * Math.cos(mid), 0.8 * R * Math.sin(mid), x1, y1);
-    }
-    const ringHole = new THREE.Path();
-    ringHole.absarc(0, 0, 0.36, 0, Math.PI * 2, true);
-    rotorShape.holes.push(ringHole);
-    const rotorGeo = new THREE.ExtrudeGeometry(rotorShape, { depth: W * 0.94, bevelEnabled: true, bevelSize: 0.02, bevelThickness: 0.02, bevelSegments: 2, curveSegments: 18 });
-    rotorGeo.translate(0, 0, -W * 0.47);
-    const internalGear = gearGeometry(0.36, W * 0.5, 0.04);
-    internalGear.translate(0, 0, W * 0.2);
-    const statGear = gearGeometry(0.24, W * 0.55, 0.04);
-
-    const shaft = new THREE.Group();
-    this.crank = shaft;
-    this.engine.add(shaft);
-    shaft.add(this.addMetal(new THREE.Mesh(cylAlongZ(0.12, pulleyZ + half + 0.3, 24).translate(0, 0, (pulleyZ - half - 0.3) / 2), M.steel)));
-    const pulley = merge([cylAlongZ(this.geom.pulleyR, 0.12, 40), new THREE.BoxGeometry(0.06, 0.6, 0.13)]);
-    pulley.translate(0, 0, pulleyZ);
-    shaft.add(this.addMetal(new THREE.Mesh(pulley, M.darkSteel)));
-    const lobeGeo = cylAlongZ(0.2, W * 0.9, 28);
-    const glowGeo = new THREE.SphereGeometry(0.34, 18, 12);
-    const glowMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-    this.glows = this.instanced(glowGeo, glowMat, n, core);
-    this.glows.userData.ownMaterial = true;
-    this.glows.renderOrder = 3;
-    const portGeo = cylAlongZ(0.11, W * 0.62, 12);
-    const portMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
-    this.portMarks = this.instanced(portGeo, portMat, n * 2, core, false);
-    this.portMarks.userData.ownMaterial = true;
-    this.portMarks.frustumCulled = false;
-    this.portMarks.renderOrder = 3;
-    const plugGeo = new THREE.CylinderGeometry(0.05, 0.05, 0.4, 10);
-    const plugs = this.instanced(plugGeo, M.ceramic, n * 2, core, false);
-    // Port positions on the bore (core frame): exhaust leads, intake trails.
-    const portAt = (deg, rad) => epitrochoid(deg * DEG, R + rad, e * (rad > 0 ? 0.6 : 1));
-
-    this.rotors = [];
-    const exPorts = [];
-    const inPorts = [];
-    for (let i = 0; i < n; i++) {
-      const z = half - gap - W / 2 - i * (W + gap);
-      const housing = new THREE.Mesh(housingGeo, M.glass);
-      housing.position.z = z;
-      core.add(withEdges(housing, M.edge, 40));
-      // The shaft turns +θ for rotaries, so the lobe that carries rotor i sits at
-      // a fixed offset: the rotor centre e·(cos a, sin a) in the core frame,
-      // turned −90° into the engine frame and back by −θ into the shaft frame.
-      const lobe = new THREE.Mesh(lobeGeo, M.chrome);
-      const phase = p.rotorPhases[i] * DEG;
-      lobe.position.set(e * Math.sin(phase), -e * Math.cos(phase), z);
-      shaft.add(this.addMetal(lobe));
-      const stat = new THREE.Mesh(statGear, M.darkSteel);
-      stat.position.z = z + W * 0.2;
-      core.add(stat);
-
-      const rotor = new THREE.Group();
-      rotor.add(this.addMetal(new THREE.Mesh(rotorGeo, M.chrome)));
-      rotor.add(this.addMetal(new THREE.Mesh(internalGear, M.friction)));
-      rotor.position.z = z;
-      core.add(rotor);
-      setRotZ(this.m4, 0, 1, 0, 0, z);
-      this.glows.setColorAt(i, this.color.setRGB(0, 0, 0));
-      for (const [k, dx] of [[0, -0.32], [1, 0.32]]) {
-        setRotZ(this.m4, 0, 1, dx, -(R - e) - 0.42, z);
-        plugs.setMatrixAt(i * 2 + k, this.m4);
-      }
-      [[60, 1], [120, 0]].forEach(([deg, kind]) => {
-        const [bx, by] = portAt(deg, 0);
-        setRotZ(this.m4, 0, 1, bx * 1.04, by * 1.04, z);
-        this.portMarks.setMatrixAt(i * 2 + kind, this.m4);
-        this.portMarks.setColorAt(i * 2 + kind, this.color.setRGB(0, 0, 0));
-        // Outer housing point, turned into the engine frame (x, y) → (y, −x).
-        const [ox, oy] = portAt(deg, 0.32);
-        const p3 = v3(oy, -ox, z);
-        const d = v3(oy, -ox, 0).normalize();
-        if (kind === 1) exPorts.push(p3);
-        else inPorts.push({ p: p3, d });
-      });
-      this.rotors.push({ rotor, phase: p.rotorPhases[i], z, label: v3() });
-    }
-    for (let i = 0; i <= n; i++) {
-      const plate = new THREE.Mesh(plateGeo, M.glassDark);
-      plate.position.z = half - gap / 2 - i * (W + gap);
-      core.add(withEdges(plate, M.edge, 40));
-    }
-    core.updateMatrix();
-    this.core = core;
-    this.geom.lowY = -(R + 0.45);
-    this.geom.caseTop = R + 0.45;
-    this.geom.breachNormal = v3(1, 0, 0);
-    this.geom.breachAt = v3(1.3, 0, 0);
-    const out = exPorts.reduce((a, q) => a.add(v3(q.x, q.y, 0)), v3()).normalize();
-    this.ports = { exGroups: [{ bankDeg: 0, out, members: exPorts.map((_, i) => i), ports: exPorts }], inPorts, twoBanks: false };
-    this.pointsFor(n, 1.4);
-  }
-
   // Exhaust headers + tailpipes and the induction hardware, which share the
   // collectors (turbos sit on them).
   buildBreathing() {
@@ -614,132 +468,6 @@ export class EngineView {
       dirs.push([Math.sin(ph) * Math.cos(th), Math.sin(ph) * Math.sin(th), Math.cos(ph), 0.4 + 0.6 * (Math.sin(i * 13.1) * 0.5 + 0.5)]);
     }
     this.sparks = { pts, pos, col, dirs, per, scale };
-  }
-
-  buildDriveline(p, drive) {
-    const M = this.M;
-    const { fwZ, z0, spacing, boxLen, C } = this.dl;
-    const g = new THREE.Group();
-    this.root.add(g);
-
-    // Flywheel with ring gear, bolted to the crank.
-    const fwR = 1.45;
-    const flywheel = new THREE.Group();
-    flywheel.add(this.addMetal(new THREE.Mesh(cylAlongZ(fwR, 0.16, 64), M.darkSteel)));
-    const teeth = new THREE.InstancedMesh(new THREE.BoxGeometry(0.05, 0.07, 0.13), M.steel, 96);
-    const q = new THREE.Quaternion();
-    const one = v3(1, 1, 1);
-    for (let i = 0; i < 96; i++) {
-      const a = (i / 96) * Math.PI * 2;
-      q.setFromAxisAngle(Z_AXIS, -a);
-      this.m4.compose(v3(Math.sin(a) * (fwR + 0.03), Math.cos(a) * (fwR + 0.03), 0), q, one);
-      teeth.setMatrixAt(i, this.m4);
-    }
-    flywheel.add(this.addMetal(teeth));
-    const marks = merge([0, Math.PI].map((a) => {
-      const m = new THREE.BoxGeometry(0.1, 0.32, 0.03);
-      m.rotateZ(-a);
-      return m.translate(Math.sin(a) * (fwR - 0.3), Math.cos(a) * (fwR - 0.3), 0.09);
-    }));
-    flywheel.add(new THREE.Mesh(marks, M.timing));
-    flywheel.position.z = fwZ;
-    this.crank.add(flywheel);
-    this.flywheel = flywheel;
-    this.fwZ = fwZ;
-
-    // Clutch: pressure plate turns with the engine, disc with the gearbox input.
-    const pressure = this.addMetal(new THREE.Mesh(cylAlongZ(1.22, 0.1, 48), M.steel));
-    this.crank.add(pressure);
-    this.pressurePlate = pressure;
-    this.pressureZ = fwZ - 0.24;
-    const disc = new THREE.Group();
-    disc.add(this.addMetal(new THREE.Mesh(cylAlongZ(1.1, 0.05, 48), M.friction)));
-    disc.add(this.addMetal(new THREE.Mesh(merge([0, 1, 2, 3, 4, 5].map((i) => {
-      const a = (i / 6) * Math.PI * 2;
-      return new THREE.BoxGeometry(0.1, 0.2, 0.08).rotateZ(-a).translate(Math.sin(a) * 0.45, Math.cos(a) * 0.45, 0);
-    })), M.chrome)));
-    this.clutchDisc = disc;
-    g.add(disc);
-    this.discZ = fwZ - 0.13;
-    disc.position.z = this.discZ;
-
-    const bell = new THREE.Mesh(new THREE.CylinderGeometry(1.35, 1.7, 0.75, 40, 1, true), M.glass);
-    bell.rotation.x = Math.PI / 2;
-    bell.position.z = fwZ - 0.2;
-    const bellGroup = new THREE.Group();
-    bellGroup.add(withEdges(bell, M.edge, 50));
-    g.add(this.addExplodable(bellGroup, 'bell'));
-
-    // Gearbox: input shaft on the axis, lay shaft below, gears sized from the ratios.
-    const gbx = new THREE.Group();
-    g.add(this.addExplodable(gbx, 'gearbox'));
-    const gw = 0.15;
-    const ratios = [...drive.gearRatios, drive.reverseRatio];
-    const caseMesh = new THREE.Mesh(new THREE.BoxGeometry(2.0, 2.35, boxLen), M.glass);
-    caseMesh.position.set(0, -C / 2, z0 - boxLen / 2 + 0.15);
-    gbx.add(withEdges(caseMesh, M.edge));
-    this.gearboxCenter = caseMesh.position.clone();
-
-    const input = new THREE.Group();
-    const lay = new THREE.Group();
-    lay.position.y = -C;
-    const output = new THREE.Group();
-    gbx.add(input, lay, output);
-    input.add(this.addMetal(new THREE.Mesh(cylAlongZ(0.07, 0.9, 16), M.steel)));
-    input.position.z = z0 + 0.3;
-    // Constant-mesh head pair at 1:1, so each main gear turns at input / ratio.
-    const head = new THREE.Mesh(gearGeometry(C * 0.5, gw), M.gear);
-    head.position.z = -0.3;
-    input.add(this.addMetal(head));
-    lay.add(this.addMetal(new THREE.Mesh(cylAlongZ(0.07, boxLen - 0.2, 16), M.steel)));
-    lay.position.z = z0 - boxLen / 2 + 0.15;
-    const layHead = new THREE.Mesh(gearGeometry(C * 0.5, gw), M.gear);
-    layHead.position.z = z0 - lay.position.z;
-    lay.add(this.addMetal(layHead));
-    const outLen = boxLen + 0.7;
-    output.add(this.addMetal(new THREE.Mesh(merge([
-      cylAlongZ(0.08, outLen, 16),
-      cylAlongZ(0.22, 0.08, 24).translate(0, 0, -outLen / 2 + 0.1),
-    ]), M.steel)));
-    output.position.z = z0 - boxLen / 2 - 0.2;
-
-    this.gearPairs = ratios.map((k, i) => {
-      const z = z0 - spacing * (i + 1);
-      const isReverse = i === ratios.length - 1;
-      const kk = Math.max(0.5, Math.min(3.6, k));
-      const rm = (C * kk) / (1 + kk);
-      const rl = C / (1 + kk);
-      const main = new THREE.Mesh(gearGeometry(rm, gw), M.gear);
-      main.position.set(0, 0, z);
-      gbx.add(main);
-      const layGear = new THREE.Mesh(gearGeometry(rl, gw), M.gear);
-      layGear.position.z = z - lay.position.z;
-      lay.add(layGear);
-      let idler = null;
-      if (isReverse) {
-        // Reverse idler beside the pair flips the output's direction.
-        idler = new THREE.Mesh(gearGeometry(0.2, gw), M.gear);
-        idler.position.set(0.48, -C * 0.55, z);
-        gbx.add(idler);
-      }
-      return { main, layGear, idler, ratio: k, gear: isReverse ? 'R' : i + 1, z };
-    });
-
-    // Shift collars (1-2, 3-4, 5-R) slide towards the selected gear.
-    this.collars = [0, 2, 4].map((i) => {
-      const a = this.gearPairs[i];
-      const b = this.gearPairs[i + 1];
-      const collar = this.addMetal(new THREE.Mesh(cylAlongZ(0.17, 0.08, 24), M.chrome));
-      const mid = (a.z + b.z) / 2;
-      collar.position.z = mid;
-      gbx.add(collar);
-      return { collar, mid, a, b, pos: mid };
-    });
-
-    this.input = input;
-    this.lay = lay;
-    this.output = output;
-    this.gbx = gbx;
   }
 
   // Thrown connecting rod and the breach in the block, hidden until blowUp().
