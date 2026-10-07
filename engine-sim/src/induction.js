@@ -151,7 +151,10 @@ export class Induction {
       }
     }
 
-    const target = (1 + this.chargeBar) * throttleFactor(running ? plate : 0) - 1;
+    // A stopped engine pumps nothing, so its manifold sits at atmospheric
+    // pressure; one dragged round by the wheels still pulls vacuum.
+    const pumping = running ? 1 : clamp(rpm / 600, 0, 1);
+    const target = ((1 + this.chargeBar) * throttleFactor(running ? plate : 0) - 1) * pumping;
     this.boostBar += (target - this.boostBar) * (1 - Math.exp(-h / MANIFOLD_TAU));
     this.multiplier = boostMultiplier(this.boostBar);
     return vented;

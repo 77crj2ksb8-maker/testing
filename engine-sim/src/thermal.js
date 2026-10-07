@@ -2,7 +2,8 @@
 //
 // Coolant: combustion heat in, radiator heat out. The thermostat opens from
 // ~82 °C and airflow comes from the fan plus road speed, so a car driven hard
-// stays near 90–100 °C while one parked on the limiter slowly boils. Over-rev
+// stays near 90–100 °C while one parked on the limiter slowly boils (the
+// coolant tops out at its boiling point and the damage builds). Over-rev
 // damage comes from the wheels dragging the engine past redline (a missed
 // downshift): the limiter cannot help because the fuel is already cut.
 
@@ -16,6 +17,7 @@ export const COOLANT_START_C = 90;
 export const COOLANT_WARN_C = 112; // 'overheat' event
 const COOLANT_REARM_C = 104;
 export const COOLANT_DAMAGE_C = 120; // head gasket starts to suffer
+export const COOLANT_BOIL_C = 130; // pressurised coolant boils: the gauge pegs here while damage piles up
 export const OVERREV_START = 1.05; // × redline: mechanical over-rev begins
 export const OVERREV_FATAL = 1.3; // × redline: instant failure
 const HEAT_GAIN = 3.7; // °C/s at full rated power, before cooling
@@ -63,7 +65,7 @@ export class Thermal {
     const air = s.running ? 0.25 + Math.min(1.6, s.kmh / 70) : 0.05 + Math.min(1.6, s.kmh / 70);
     const open = smoothstep((this.coolantC - 82) / 12);
     const heatOut = COOL_GAIN * Math.max(0, this.coolantC - AMBIENT_C) * (air * (0.06 + 0.94 * open));
-    this.coolantC += (heatIn - heatOut) * h;
+    this.coolantC = Math.min(COOLANT_BOIL_C, this.coolantC + (heatIn - heatOut) * h);
     if (!this.warned && this.coolantC >= COOLANT_WARN_C) {
       this.warned = true;
       flags |= 1;
