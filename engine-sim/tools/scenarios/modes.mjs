@@ -12,6 +12,29 @@ export default async function modes({ page, evaluate, advance, shot, expect, log
     const r = window.__app.modes.race;
     return { phase: r.phase, ambers: r.ambers, green: r.greenLit, foul: r.foul, et: r.et, distance: r.distance };
   });
+  /** Wait (real time) until a page condition holds; false on timeout. */
+  const waitFor = (fn, arg, timeout = 8000) => page.waitForFunction(fn, arg, { timeout, polling: 100 }).then(() => true, () => false);
+  /** What a floating card covers: HUD cards, the driving controls, rail buttons, or the screen edge. */
+  const covers = (sel) => evaluate((sel) => {
+    const box = document.querySelector(sel).getBoundingClientRect();
+    const hard = [];
+    const rail = [];
+    const hit = (node) => {
+      const r = node.getBoundingClientRect();
+      return r.width && r.height && r.left < box.right && r.right > box.left && r.top < box.bottom && r.bottom > box.top;
+    };
+    for (const s of ['.tach', '.hud-right', '.shifter-wrap', '.pedal-wrap']) if (hit(document.querySelector(s))) hard.push(s);
+    for (const b of document.querySelectorAll('#tool-rail > *')) if (hit(b)) rail.push(`#${b.id}`);
+    if (box.left < 0 || box.top < 0 || box.right > window.innerWidth + 0.5 || box.bottom > window.innerHeight + 0.5) hard.push('screen edge');
+    return { hard, rail, box: `${Math.round(box.left)},${Math.round(box.top)} ${Math.round(box.width)}×${Math.round(box.height)}` };
+  }, sel);
+  const clearOf = async (sel, name, { rail = true } = {}) => {
+    const c = await covers(sel);
+    log(`${name} at ${c.box}${c.rail.length ? ` (over ${c.rail.join(' ')})` : ''}`);
+    expect(c.hard.length === 0, `${name} clear of the HUD and the controls${c.hard.length ? ` (covers ${c.hard.join(', ')})` : ''}`);
+    if (rail) expect(c.rail.length === 0, `${name} clear of the tool rail${c.rail.length ? ` (covers ${c.rail.join(', ')})` : ''}`);
+  };
+
   /** Step in small slices until the race reaches a phase (or a time limit). */
   const until = async (phase, input, limit = 8, slice = 0.05) => {
     for (let t = 0; t < limit; t += slice) {
@@ -27,6 +50,7 @@ export default async function modes({ page, evaluate, advance, shot, expect, log
   await tap('#tool-drag');
   expect(await evaluate(() => document.querySelector('#tool-drag').getAttribute('aria-pressed') === 'true'), 'drag button shows pressed');
   expect((await race()).phase === 'pre', 'drag strip armed');
+  await clearOf('.mo-drag', 'drag card');
   await evaluate(() => window.__app.actions.selectGear(1, 'test'));
   expect(await until('staged', { brake: 1 }, 3), 'stages once stopped with the engine running');
   expect(await until('tree', { brake: 1 }, 3), 'tree starts');
@@ -53,6 +77,7 @@ export default async function modes({ page, evaluate, advance, shot, expect, log
   expect((await events('drag:stage')).length === 1 && (await events('drag:green')).length === 1, 'stage and green events');
   expect(await evaluate(() => document.querySelector('.mo-drag').hidden), 'the slip takes the place of the live card');
   await advance(6, { brake: 1 });
+  await clearOf('.mo-slip', 'time slip', { rail: false });
   await shot('modes-drag-slip');
 
   // ── Red light ───────────────────────────────────────────────────────────
@@ -67,9 +92,12 @@ export default async function modes({ page, evaluate, advance, shot, expect, log
   expect((await events('drag:foul')).length === 1, 'drag:foul emitted');
   await shot('modes-drag-redlight');
   await evaluate(() => window.__app.apply({ units: 'mph' }, 'hud'));
-  await page.waitForTimeout(400);
+  const unitsOk = await waitFor(() => {
+    const units = [...document.querySelectorAll('.mo-drag .mo-num span')].map((n) => n.textContent);
+    return units.includes('mph') && units.includes('ft');
+  });
   const units = await evaluate(() => [...document.querySelectorAll('.mo-drag .mo-num span')].map((n) => n.textContent));
-  expect(units.includes('mph') && units.includes('ft'), `drag card follows the units setting (${units.join(', ')})`);
+  expect(unitsOk, `drag card follows the units setting (${units.join(', ')})`);
   await evaluate(() => window.__app.apply({ units: 'kmh' }, 'hud'));
   await page.keyboard.press('Escape');
   expect(await evaluate(() => !window.__app.modes.race.active && document.querySelector('.mo-drag').hidden), 'Esc leaves the drag strip');
@@ -132,14 +160,15 @@ export default async function modes({ page, evaluate, advance, shot, expect, log
     a.viewState.scrubDeg = 12; // a scrubbed crank holds the cycle still; 12° after firing TDC is near the peak
     document.querySelector('.mo-section[aria-label="Cylinder pressure"]').scrollIntoView({ block: 'start' });
   });
-  await page.waitForTimeout(500);
+  const marked = await waitFor(() => /Power/.test(window.__app.modes.pv.now.textContent));
+  await waitFor(() => !document.querySelector('#toast')?.classList.contains('is-on'), undefined, 4000);
   const pv = await evaluate(() => {
     const c = window.__app.modes.pv.cycle;
     return { peak: c.peakBar, imep: c.imep, readout: document.querySelector('.mo-section .chart-readout').textContent, now: window.__app.modes.pv.now.textContent };
   });
   log(`pressure: ${pv.readout} | ${pv.now}`);
   expect(pv.peak > 40 && pv.peak < 120 && pv.imep > 8 && pv.imep < 15 && /IMEP/.test(pv.readout), 'full-load cycle in telemetry (40-120 bar peak, 8-15 bar IMEP)');
-  expect(/Power/.test(pv.now), 'marker follows the scrubbed crank angle (power stroke)');
+  expect(marked && /Power/.test(pv.now), `marker follows the scrubbed crank angle (${pv.now})`);
   await shot('modes-pv');
   await evaluate(() => document.querySelector('.mo-section[aria-label="Achievements"]').scrollIntoView({ block: 'start' }));
   const ach = await evaluate(() => ({ list: window.__events.filter((e) => e.type === 'achievement').map((e) => e.id), count: window.__app.modes.achievements.count }));

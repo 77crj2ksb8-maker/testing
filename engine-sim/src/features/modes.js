@@ -4,7 +4,7 @@
 // src/achievements.js); this file wires them to the app (docs/CONTRACT.md)
 // and owns their DOM, CSS and canvas charts.
 
-import { el, injectStyles } from '../dom.js';
+import { el, injectStyles, formatSpeed, speedUnit } from '../dom.js';
 import { wotTorque, powerHp, layoutOf, peakFigures } from '../config.js';
 import { RPM_TO_RAD } from '../physics.js';
 import { DragRace, DragRecords, DRAG_MARKS, QUARTER_M } from '../modes/drag.js';
@@ -32,8 +32,13 @@ const RUNS_KEPT = 3;
 const PV_RECOMPUTE_S = 0.12;
 const TOAST_GAP_S = 2.6;
 
-const fmtInt = (n) => Math.round(n).toLocaleString('en-US');
-const fmtRpm = (rpm) => (Math.round(rpm / 50) * 50).toLocaleString('en-US');
+// One formatter for every readout (toLocaleString builds a new one per call).
+const NUM = new Intl.NumberFormat('en-US', { maximumFractionDigits: 0 });
+const fmtInt = (n) => NUM.format(Math.round(n));
+const fmtRpm = (rpm) => NUM.format(Math.round(rpm / 50) * 50);
+const KMH_TO_MPH = 0.621371;
+/** Speed with one decimal in the user's units (time slips). */
+const speedFixed = (kmh, units) => `${(units === 'mph' ? kmh * KMH_TO_MPH : kmh).toFixed(1)} ${speedUnit(units)}`;
 const smooth01 = (x) => {
   const t = x < 0 ? 0 : x > 1 ? 1 : x;
   return t * t * (3 - 2 * t);
@@ -204,11 +209,21 @@ const CSS = `
 .mo-close svg, .mo-ach-ico svg { fill: none; stroke: var(--fg); stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
 
 /* Drag strip: live card under the top HUD, clear of the tool rail and the controls. */
+/* Where the HUD leaves room: the drag card and the slip are positioned from JS. */
+.mo-safe {
+  position: absolute;
+  left: calc(var(--safe-left) + var(--gutter));
+  right: calc(var(--safe-right) + var(--gutter));
+  top: calc(var(--safe-top) + 8px);
+  bottom: calc(var(--safe-bottom) + 8px);
+  visibility: hidden;
+  pointer-events: none !important;
+}
 .mo-drag {
   top: calc(var(--hud-top-h, 120px) + 10px);
   left: calc(var(--safe-left) + var(--gutter));
-  right: calc(var(--safe-right) + var(--gutter) + 52px);
-  max-width: 420px;
+  width: 320px;
+  overflow: hidden;
   display: flex;
   gap: 12px;
   padding: 10px 12px 10px 10px;
@@ -230,10 +245,10 @@ const CSS = `
 .mo-bulb.is-amber.is-on { background: var(--amber); box-shadow: 0 0 12px var(--amber); }
 .mo-bulb.is-green.is-on { background: var(--good); box-shadow: 0 0 14px var(--good); }
 .mo-bulb.is-red.is-on { background: var(--red); box-shadow: 0 0 14px var(--red); }
-.mo-drag-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.mo-drag-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 6px; container-type: inline-size; }
 .mo-drag-head { display: flex; align-items: center; gap: 8px; }
 .mo-kicker { margin: 0 auto 0 0; font-size: 11px; font-weight: 700; letter-spacing: 0.12em; color: var(--muted); text-transform: uppercase; }
-.mo-drag-msg { margin: 0; font-size: 15px; font-weight: 700; min-height: 1.2em; line-height: 1.2; }
+.mo-drag-msg { margin: 0; font-size: 15px; font-weight: 700; min-height: 1.2em; line-height: 1.2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .mo-drag-msg.is-go { color: var(--good); }
 .mo-drag-msg.is-bad { color: var(--red); }
 .mo-drag-nums { display: grid; grid-template-columns: 1.25fr 1fr 1fr; gap: 6px; }
@@ -248,17 +263,18 @@ const CSS = `
 .mo-splits b { font-size: 10px; font-weight: 600; color: var(--muted); }
 .mo-splits span { font-family: var(--font-data); font-size: 11px; color: var(--faint); }
 .mo-splits li.is-hit span { color: var(--fg); }
+@container (max-width: 230px) {
+  .mo-num output { font-size: 16px; }
+  .mo-splits { gap: 3px; }
+  .mo-splits b, .mo-splits span { font-size: 9.5px; }
+}
 
 /* Time slip: a printed receipt that takes the live card's place after a run. */
 .mo-slip {
   position: absolute;
   top: calc(var(--hud-top-h, 120px) + 10px);
   left: calc(var(--safe-left) + var(--gutter));
-  right: calc(var(--safe-right) + var(--gutter) + 52px);
-  width: auto;
-  max-width: 300px;
-  margin-inline: auto;
-  max-height: calc(100% - var(--hud-top-h, 120px) - var(--controls-h, 200px) - 14px);
+  width: 300px;
   overflow-y: auto;
   overscroll-behavior: contain;
   touch-action: pan-y;
@@ -343,7 +359,8 @@ const CSS = `
 .mo-section h3 .mo-tag { margin-left: 6px; font-family: var(--font-data); font-size: 10px; font-weight: 500; color: var(--muted); }
 .mo-pv-row { display: grid; grid-template-columns: 1fr; gap: 0 14px; }
 @media (min-width: 640px) { .mo-pv-row { grid-template-columns: 1fr 1fr; } }
-.mo-chart-pv { height: 150px; }
+.mo-chart-pv { height: 128px; }
+@media (min-width: 640px) { .mo-chart-pv { height: 150px; } }
 .mo-ach-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .mo-ach-list li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; padding: 7px 9px; border-radius: 9px; background: var(--raise); min-width: 0; }
 .mo-ach-list b { display: block; font-size: 13px; font-weight: 700; line-height: 1.2; }
@@ -356,17 +373,7 @@ const CSS = `
 @media (max-height: 500px) {
   /* Landscape phones: the drag card and the slip sit top-centre, between the
      tach and the buttons and clear of the lever and pedals below. */
-  .mo-drag {
-    top: calc(var(--safe-top) + 8px);
-    left: 50%;
-    right: auto;
-    transform: translateX(-50%);
-    width: calc(100% - 2 * (max(var(--safe-left), var(--safe-right)) + var(--gutter) + 230px));
-    max-width: 330px;
-    min-width: 250px;
-    padding: 8px 10px 8px 8px;
-    gap: 9px;
-  }
+  .mo-drag { padding: 8px 10px 8px 8px; gap: 9px; }
   .mo-drag-msg { font-size: 14px; }
   .mo-splits span { font-size: 10px; }
   .mo-bulb { width: 14px; height: 14px; }
@@ -374,12 +381,6 @@ const CSS = `
   .mo-tree { gap: 4px; padding: 5px 4px; }
   .mo-num output { font-size: 16px; }
   .mo-slip {
-    top: calc(var(--safe-top) + 8px);
-    left: 50%;
-    right: auto;
-    transform: translateX(-50%);
-    width: 224px;
-    max-height: calc(100% - var(--safe-top) - var(--safe-bottom) - 16px);
     padding: 10px 12px 18px;
     font-size: 11px;
     line-height: 1.35;
@@ -423,6 +424,7 @@ export default {
 
     // ── Drag strip ─────────────────────────────────────────────────────────
     const race = new DragRace();
+    let msgKey = ''; // what the drag card's status line currently says
     const dragRecords = new DragRecords(storageFor(KEYS.drag));
     const engineKey = () => {
       const kind = app.profile.induction?.kind ?? 'na';
@@ -450,6 +452,8 @@ export default {
       dirty: true,
       chartsDirty: true,
       hoverRpm: null,
+      msgKey: null,
+      barWidth: '',
     };
 
     function loadRuns() {
@@ -483,6 +487,103 @@ export default {
     const setClass = (node, cls, on) => {
       if (node.classList.contains(cls) !== on) node.classList.toggle(cls, on);
     };
+
+    // ── Placement ──────────────────────────────────────────────────────────
+    // The drag card and the time slip float over the 3D view. The HUD around
+    // them (tach, top-right buttons, tool rail, lever, pedals) is sized by
+    // other features at run time, so measure it on layout changes (never per
+    // frame) and take the highest spot that clears it: the HUD cards and the
+    // driving controls always, the rail buttons too whenever there is room.
+    const safeArea = el('div', { class: 'mo-safe', 'aria-hidden': 'true' });
+    overlay.append(safeArea);
+    const HARD = ['.tach', '.hud-right', '.shifter-wrap', '.pedal-wrap'];
+    const CLEAR = 8; // px kept between a card and anything it avoids
+    const COMFY_W = 330; // px: wider than this is nice to have, not worth moving down for
+    const railEl = app.ui.toolRail ?? document.getElementById('tool-rail');
+
+    function obstacles(origin, withRail) {
+      const out = [];
+      const add = (node) => {
+        if (!node || node.hidden) return;
+        const r = node.getBoundingClientRect();
+        if (!r.width || !r.height) return;
+        out.push({ l: r.left - origin.left - CLEAR, r: r.right - origin.left + CLEAR, t: r.top - origin.top - CLEAR, b: r.bottom - origin.top + CLEAR });
+      };
+      for (const sel of HARD) add(document.querySelector(sel));
+      if (withRail && railEl) for (const b of railEl.children) add(b);
+      return out;
+    }
+
+    /** Widest free span of [l, r] across the band [t, b]. */
+    function widestGap(obs, t, b, l, r) {
+      const spans = obs.filter((o) => o.t < b && o.b > t).sort((p, q) => p.l - q.l);
+      let best = { l: 0, r: 0 };
+      let x = l;
+      for (const o of spans) {
+        if (o.l - x > best.r - best.l) best = { l: x, r: Math.min(o.l, r) };
+        x = Math.max(x, o.r);
+      }
+      if (r - x > best.r - best.l) best = { l: x, r };
+      return best;
+    }
+
+    /** Highest, widest spot for a w0..w1 × h box (width counts fully up to a comfortable size, moving down costs). */
+    function findSpot(area, obs, w0, w1, h) {
+      let best = null;
+      for (let y = area.t; y + h <= area.b; y += 4) {
+        const g = widestGap(obs, y, y + h, area.l, area.r);
+        const w = Math.min(w1, g.r - g.l);
+        if (w < w0) continue;
+        const score = Math.min(w, COMFY_W) + 0.15 * Math.max(0, w - COMFY_W) - 0.4 * (y - area.t);
+        if (!best || score > best.score) best = { score, x: g.l + (g.r - g.l - w) / 2, y, w };
+        if (w >= w1) break;
+      }
+      return best;
+    }
+
+    function placeCard(node, w0, w1, minH) {
+      const origin = overlay.getBoundingClientRect();
+      const sa = safeArea.getBoundingClientRect();
+      const area = { l: sa.left - origin.left, r: sa.right - origin.left, t: sa.top - origin.top, b: sa.bottom - origin.top };
+      const maxW = Math.min(w1, area.r - area.l);
+      node.style.maxHeight = '';
+      node.style.width = `${maxW}px`;
+      let h = node.offsetHeight;
+      let spot = null;
+      for (const withRail of [true, false]) {
+        for (let hh = h; !spot && hh >= Math.min(h, minH); hh -= 30) {
+          spot = findSpot(area, obstacles(origin, withRail), Math.min(w0, maxW), maxW, hh);
+          if (spot && spot.w < maxW) {
+            // Narrower than measured: the text may wrap, so check the height again.
+            node.style.width = `${spot.w}px`;
+            const taller = node.offsetHeight;
+            if (taller > hh) spot = findSpot(area, obstacles(origin, withRail), spot.w, spot.w, taller);
+          }
+          if (spot) h = Math.min(h, hh);
+        }
+        if (spot) break;
+      }
+      if (!spot) spot = { x: area.l, y: area.t, w: maxW }; // nothing clears: top left, scrolling
+      node.style.left = `${Math.round(spot.x)}px`;
+      node.style.top = `${Math.round(spot.y)}px`;
+      node.style.width = `${Math.round(spot.w)}px`;
+      node.style.maxHeight = `${Math.round(Math.max(minH, Math.min(h, area.b - spot.y)))}px`;
+    }
+
+    let placeQueued = 0;
+    function placeOverlays() {
+      placeQueued = 0;
+      if (!dragUi.root.hidden) placeCard(dragUi.root, 250, 420, 120);
+      if (!slipUi.root.hidden) placeCard(slipUi.root, 224, 300, 190);
+    }
+    const queuePlacement = () => {
+      if (!placeQueued && (!dragUi.root.hidden || !slipUi.root.hidden)) placeQueued = requestAnimationFrame(placeOverlays);
+    };
+    // The rail and the HUD cards change size when other features show or hide things.
+    if (typeof ResizeObserver !== 'undefined') {
+      const ro = new ResizeObserver(queuePlacement);
+      for (const node of [railEl, document.querySelector('.tach'), document.querySelector('.hud-bottom'), overlay]) if (node) ro.observe(node);
+    }
 
     function buildDragUi() {
       const bulb = (cls) => el('span', { class: `mo-bulb ${cls}` });
@@ -629,15 +730,16 @@ export default {
     function buildAchievementsUi() {
       const count = el('p', { class: 'chart-readout' });
       const items = ACHIEVEMENTS.map((a) => {
-        const li = el('li', { title: a.detail },
+        const detail = el('span', { text: a.detail });
+        const li = el('li', {},
           el('span', { class: 'mo-ach-ico', html: ICONS.trophy, 'aria-hidden': 'true' }),
-          el('div', {}, el('b', { text: a.title }), el('span', { text: a.detail })));
-        return { id: a.id, li };
+          el('div', {}, el('b', { text: a.title }), detail));
+        return { id: a.id, li, detail, base: a.detail };
       });
       const root = el('section', { class: 'mo-section', 'aria-label': 'Achievements' },
         el('div', { class: 'chart-head' }, el('h3', { text: 'Achievements' }), count),
         el('ul', { class: 'mo-ach-list' }, items.map((i) => i.li)));
-      return { root, count, items, dirty: true };
+      return { root, count, items, dirty: true, layouts: -1 };
     }
 
     // ── Drag flow ──────────────────────────────────────────────────────────
@@ -650,8 +752,10 @@ export default {
 
     function armDrag() {
       race.arm();
+      msgKey = '';
       slipUi.root.hidden = true;
       dragUi.root.hidden = false;
+      placeOverlays();
     }
 
     function exitDrag() {
@@ -675,11 +779,10 @@ export default {
         showSlip(result);
       } else if (e.type === 'abort') {
         bus.emit('drag:abort', { reason: e.reason });
+        app.toast(`${e.reason}. Stage again when ready.`, 'warn', 2600);
+        armDrag();
       }
     }
-
-    const speedIn = (kmh, units) => (units === 'mph' ? kmh * 0.621371 : kmh);
-    const unitLabel = (units) => (units === 'mph' ? 'mph' : 'km/h');
 
     function showSlip(r) {
       const units = app.settings.units;
@@ -688,7 +791,7 @@ export default {
       setText(slipUi.sub, `Lane 1 · ${r.engine} · ${time}`);
       const row = (label, value, extra = '', final = false) => el('tr', { class: final ? 'is-final' : null },
         el('td', { text: label }), el('td', { text: value }), el('td', { text: extra }));
-      const sp = (kmh) => (kmh == null ? '' : `${speedIn(kmh, units).toFixed(1)} ${unitLabel(units)}`);
+      const sp = (kmh) => (kmh == null ? '' : speedFixed(kmh, units));
       slipUi.table.replaceChildren(
         row('R/T', r.reaction.toFixed(3)),
         ...r.splits.map((s, i) => row(DRAG_MARKS[i].label, s.t.toFixed(3), DRAG_MARKS[i].trap ? sp(s.trapKmh) : '', i === r.splits.length - 1)),
@@ -698,66 +801,65 @@ export default {
       slipUi.foot.replaceChildren(
         el('span', {}, 'PB ', el('b', { text: pb?.et != null ? pb.et.toFixed(3) : '—' }), pb?.trapKmh != null ? ` · ${sp(pb.trapKmh)}` : ''),
         r.foul
-          ? el('span', { text: 'Fouled: not a record' })
+          ? el('span', { text: 'Red light: not a record' })
           : improvedEt ? el('span', { class: 'mo-pb', text: 'New personal best' }) : el('span', { text: `${r.et.toFixed(3)} s` }),
       );
       slipUi.root.hidden = false;
       dragUi.root.hidden = true;
+      placeOverlays();
     }
 
-    // Status line for the drag card, written into `msg` (no allocation per frame).
-    const msg = { text: '', tone: '' };
-    const say = (text, tone = '') => {
-      msg.text = text;
-      msg.tone = tone;
-    };
+    // Status line for the drag card, rebuilt only when what it says changes.
     function dragMessage() {
       const p = race.phase;
-      if (p === 'pre') {
-        if (sim.blown) say('Rebuild the engine to race', 'is-bad');
-        else if (!sim.running) say('Start the engine to stage');
-        else if (sim.speedKmh > 0.6) say('Stop the car to stage');
-        else say('Staging…');
-      } else if (p === 'staged') say('Staged. Watch the tree.');
-      else if (p === 'tree') say('Ready…');
-      else if (p === 'green') say('GO!', 'is-go');
-      else if (p === 'run') {
-        if (race.foul) say('Red light! Still timing the run.', 'is-bad');
-        else if (msg.tone !== 'rt') say(`Reaction ${race.reaction.toFixed(3)} s`, 'rt');
-      } else if (p === 'done') {
-        if (race.abortReason) say(`${race.abortReason}. Stop to stage again.`, 'is-bad');
-        else say('Finished', 'is-go');
-      } else say('');
+      let key = p;
+      if (p === 'pre') key = sim.blown ? 'blown' : !sim.running ? 'off' : sim.speedKmh > 0.6 ? 'moving' : 'still';
+      else if (p === 'run' && race.foul) key = 'foul';
+      if (key === msgKey) return;
+      msgKey = key;
+      let text = '';
+      let tone = '';
+      if (key === 'blown') [text, tone] = ['Engine blown. Rebuild it to race.', 'is-bad'];
+      else if (key === 'off') text = 'Start the engine to stage';
+      else if (key === 'moving') text = 'Stop the car to stage';
+      else if (key === 'still') text = 'Staging…';
+      else if (key === 'staged') text = 'Staged. Watch the tree.';
+      else if (key === 'tree') text = 'Go on the green';
+      else if (key === 'green') [text, tone] = ['GO!', 'is-go'];
+      else if (key === 'foul') [text, tone] = ['Red light. Still timing.', 'is-bad'];
+      else if (key === 'run') text = `Reaction ${race.reaction.toFixed(3)} s`;
+      else if (key === 'done') [text, tone] = ['Finished', 'is-go'];
+      setText(dragUi.msg, text);
+      setClass(dragUi.msg, 'is-go', tone === 'is-go');
+      setClass(dragUi.msg, 'is-bad', tone === 'is-bad');
     }
 
     function renderDrag() {
-      if (!race.active) return;
+      if (!race.active || dragUi.root.hidden) return;
       const units = app.settings.units;
       const p = race.phase;
       const b = dragUi.bulbs;
       const running = p === 'run' || p === 'done';
       setClass(b.pre, 'is-on', !running && (p !== 'pre' || race.stillFor > 0));
       setClass(b.stage, 'is-on', p === 'staged' || p === 'tree' || p === 'green');
-      const ambers = race.foul ? (race.clock < race.greenAt ? race.ambers : 0) : (p === 'tree' ? race.ambers : 0);
-      for (let i = 0; i < 3; i++) setClass(b.ambers[i], 'is-on', ambers > i);
-      setClass(b.green, 'is-on', race.greenLit && !race.foul && (p === 'green' || (running && race.clock - race.greenAt < 2.5)));
+      // Sportsman tree: the ambers light one after another, 0.5 s apart.
+      const amber = race.ambers;
+      for (let i = 0; i < 3; i++) setClass(b.ambers[i], 'is-on', amber === i + 1);
+      setClass(b.green, 'is-on', race.greenLit && (p === 'green' || (running && race.clock - race.greenAt < 2.5)));
       setClass(b.red, 'is-on', race.foul);
-
       dragMessage();
-      setText(dragUi.msg, msg.text);
-      setClass(dragUi.msg, 'is-go', msg.tone === 'is-go');
-      setClass(dragUi.msg, 'is-bad', msg.tone === 'is-bad');
 
-      const et = running ? race.et : 0;
-      setText(dragUi.et.out, et.toFixed(3));
-      setText(dragUi.speed.out, String(Math.round(speedIn(running ? race.speedKmh : sim.speedKmh, units))));
-      setText(dragUi.speed.unit, unitLabel(units));
+      setText(dragUi.et.out, (running ? race.et : 0).toFixed(3));
+      setText(dragUi.speed.out, String(formatSpeed(running ? race.speedKmh : sim.speedKmh, units)));
+      setText(dragUi.speed.unit, speedUnit(units));
       const metres = running ? race.distance : 0;
       setText(dragUi.dist.out, String(Math.round(units === 'mph' ? metres / 0.3048 : metres)));
       setText(dragUi.dist.unit, units === 'mph' ? 'ft' : 'm');
-      const frac = Math.min(1, metres / QUARTER_M);
-      const w = `${(frac * 100).toFixed(1)}%`;
-      if (dragUi.fill.style.width !== w) dragUi.fill.style.width = w;
+      const w = `${((Math.min(1, metres / QUARTER_M)) * 100).toFixed(1)}%`;
+      if (w !== dragUi.fillWidth) {
+        dragUi.fillWidth = w;
+        dragUi.fill.style.width = w;
+      }
       for (let i = 0; i < race.splits.length; i++) {
         const t = race.splits[i].t;
         const n = dragUi.splitNodes[i];
@@ -942,6 +1044,7 @@ export default {
       const ph = dyno.phase;
       if (dyno.dirty) {
         dyno.dirty = false;
+        dyno.msgKey = null;
         const busy = ph !== 'ready';
         dynoUi.run.disabled = busy;
         setText(dynoUi.run, dyno.runs.length ? 'Run again' : 'Run pull');
@@ -955,15 +1058,25 @@ export default {
         setText(dynoUi.nm.value, latest ? fmtInt(latest.peakNm) : '—');
         setText(dynoUi.nm.at, latest ? `@ ${fmtRpm(latest.peakNmRpm)} rpm` : ' ');
       }
-      let msg;
-      if (ph === 'ready') msg = sim.blown ? 'The engine is blown. Rebuild it to run a pull.' : sim.running ? `Ready. Full throttle in ${DYNO_GEAR}th from ${fmtRpm(dyno.startRpm)} to ${fmtRpm(dyno.endRpm)} rpm.` : 'Start the engine to run a pull.';
-      else if (ph === 'spinup') msg = `Rollers bringing it to ${fmtRpm(dyno.startRpm)} rpm…`;
-      else if (ph === 'pull') msg = `Pulling · ${fmtRpm(sim.rpm)} rpm`;
-      else msg = 'Braking the rollers…';
-      setText(dynoUi.msg, msg);
+      // Status line: rebuilt only when what it says changes.
+      const key = ph === 'ready' ? (sim.blown ? -3 : sim.running ? -2 : -1) : ph === 'pull' ? Math.round(sim.rpm / 50) : ph === 'spinup' ? -4 : -5;
+      if (key !== dyno.msgKey) {
+        dyno.msgKey = key;
+        let msg;
+        if (key === -3) msg = 'The engine is blown. Rebuild it to run a pull.';
+        else if (key === -2) msg = `Ready. Full throttle in ${DYNO_GEAR}th from ${fmtRpm(dyno.startRpm)} to ${fmtRpm(dyno.endRpm)} rpm.`;
+        else if (key === -1) msg = 'Start the engine to run a pull.';
+        else if (key === -4) msg = `Rollers bringing it to ${fmtRpm(dyno.startRpm)} rpm…`;
+        else if (key === -5) msg = 'Braking the rollers…';
+        else msg = `Pulling · ${fmtRpm(sim.rpm)} rpm`;
+        setText(dynoUi.msg, msg);
+      }
       const prog = ph === 'pull' ? (sim.rpm - dyno.startRpm) / (dyno.endRpm - dyno.startRpm) : ph === 'coast' || (ph === 'ready' && dyno.lastResult) ? 1 : 0;
       const w = `${(Math.max(0, Math.min(1, prog)) * 100).toFixed(1)}%`;
-      if (dynoUi.bar.style.width !== w) dynoUi.bar.style.width = w;
+      if (w !== dyno.barWidth) {
+        dyno.barWidth = w;
+        dynoUi.bar.style.width = w;
+      }
 
       if (ph === 'pull' && recorder.updateLive(dyno.startRpm + 150)) dyno.chartsDirty = true;
       if (dyno.chartsDirty || dynoUi.torque.sizeDirty || dynoUi.power.sizeDirty) {
@@ -1265,10 +1378,21 @@ export default {
 
     // ── Achievements UI ────────────────────────────────────────────────────
     function renderAchievements() {
+      if (achUi.layouts !== achievements.layouts.length) achUi.dirty = true;
       if (!achUi.dirty) return;
       achUi.dirty = false;
+      achUi.layouts = achievements.layouts.length;
       setText(achUi.count, `${achievements.count} / ${achievements.total}`);
-      for (const item of achUi.items) setClass(item.li, 'is-on', achievements.has(item.id));
+      for (const item of achUi.items) {
+        const on = achievements.has(item.id);
+        setClass(item.li, 'is-on', on);
+        item.li.setAttribute('aria-label', `${on ? 'Unlocked' : 'Locked'}: ${item.base}`);
+        // The collector shows what is still missing.
+        if (item.id === 'all-layouts') {
+          const missing = achievements.missingLayouts();
+          setText(item.detail, on || missing.length === 5 ? item.base : `${item.base} Still to drive: ${missing.join(', ')}.`);
+        }
+      }
     }
 
     // ── Wiring ─────────────────────────────────────────────────────────────
@@ -1299,6 +1423,7 @@ export default {
     bus.on('settings', ({ kind }) => {
       if (dyno.open && (kind === 'mode' || kind === 'all')) app.gearbox.setMode('manual');
     });
+    bus.on('layout', queuePlacement);
     bus.on('escape', () => {
       if (dyno.open) closeDyno();
       else if (race.active) exitDrag();
