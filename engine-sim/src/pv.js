@@ -127,11 +127,12 @@ export function computeCycle(g, opts, out = createCycle()) {
         target[i] = pr / BAR;
         if (i === iEvo) evoPoly = pr / BAR;
       } else {
-        // Blowdown: what is left above the back-pressure bleeds away, then
-        // the piston pushes the rest out against the exhaust system.
+        // Blowdown: the cylinder settles to the exhaust back-pressure (gas
+        // rushes out, or back in after a throttled cycle), then the piston
+        // pushes the rest out against the exhaust system.
         const w = Math.exp(-(deg[i] - EVO_DEG) / BLOWDOWN_DEG);
         const poly = evoPoly * Math.pow(v[iEvo] / v1, GAMMA);
-        target[i] = gasExchange(deg[i], pIn, pEx) + Math.max(0, poly - pEx) * w;
+        target[i] = gasExchange(deg[i], pIn, pEx) + (poly - pEx) * w;
       }
     }
   }

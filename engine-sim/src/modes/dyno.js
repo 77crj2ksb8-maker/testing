@@ -183,16 +183,17 @@ export class DynoRecorder {
 
   /**
    * Extend the live curve with every sample whose full regression window has
-   * arrived. Returns true when points were added.
+   * arrived, from `fromRpm` up (the first moments of a pull are the throttle
+   * opening, not the engine's curve). Returns true when points were added.
    */
-  updateLive(minStepRpm = 30) {
+  updateLive(fromRpm = 0, minStepRpm = 30) {
     const { t, n } = this;
     let added = false;
     while (this.liveCursor < n && t[n - 1] - t[this.liveCursor] >= REGRESSION_HALF_WINDOW) {
       const i = this.liveCursor++;
       if (t[i] - t[0] < REGRESSION_HALF_WINDOW) continue;
       const rpm = this.rpm[i];
-      if (rpm - this.lastLiveRpm < minStepRpm || this.liveN >= this.liveRpm.length) continue;
+      if (rpm < fromRpm || rpm - this.lastLiveRpm < minStepRpm || this.liveN >= this.liveRpm.length) continue;
       const nm = this.torqueAt(i);
       if (nm === null) continue;
       this.liveRpm[this.liveN] = rpm;
