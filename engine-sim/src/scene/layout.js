@@ -84,6 +84,33 @@ export function cylinderPlacement(profile, B, rodW) {
   return { pitch, z, half, throws };
 }
 
+/**
+ * Head dimensions shared by the head casting, the valvetrain and the ports
+ * (bank frame: cylinder axis +Y, deck = top of the bore).
+ */
+export function headDims(B, deck) {
+  const tilt = 16 * DEG;
+  const valveX = 0.21 * B;
+  const stemLen = 0.75 * B;
+  const bucketH = 0.1 * B;
+  const baseR = 0.13 * B;
+  const lift = 0.1 * B;
+  const reach = stemLen + bucketH + baseR; // valve seat → cam centre along the valve axis
+  const camX = valveX + reach * Math.sin(tilt);
+  const camY = deck + reach * Math.cos(tilt);
+  return {
+    deck, tilt, valveX, valveZ: 0.2 * B, stemLen, bucketH, bucketR: 0.13 * B, baseR, lift,
+    springSeat: 0.3 * B, springR: 0.105 * B, camX, camY,
+    lowerH: 0.45 * B,
+    top: camY + baseR + lift + 0.09 * B, // inside of the cam cover
+    width: 2 * (camX + baseR + lift + 0.06 * B),
+    sprocketR: 0.4 * B,
+    crankSprocketR: 0.2 * B,
+    portY: deck + 0.24 * B,
+    portX: camX + baseR + lift + 0.06 * B, // on the side wall of the head
+  };
+}
+
 // Exploded-view travel at t = 1, in bore diameters.
 export const EXPLODE = Object.freeze({
   head: 1.7, // heads, cams and valves, along the bank axis

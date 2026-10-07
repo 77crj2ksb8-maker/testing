@@ -13,8 +13,10 @@ import { makeMaterials, makeXrayMaterial, radialGlowTexture } from './scene/mate
 import {
   Z_AXIS, cylAlongZ, gearGeometry, crankWebGeometry, merge, withEdges, roundedBox, setRotZ,
 } from './scene/geometry.js';
-import { layoutOf, bankList, exhaustSide, bankToEngine, cylinderPlacement, explodeOffset } from './scene/layout.js';
-import { headDims, buildValvetrain } from './scene/valvetrain.js';
+import {
+  layoutOf, bankList, exhaustSide, bankToEngine, cylinderPlacement, explodeOffset, headDims,
+} from './scene/layout.js';
+import { buildValvetrain } from './scene/valvetrain.js';
 import { GasVolumes } from './scene/gases.js';
 import { planExhaust, ExhaustSystem } from './scene/exhaust.js';
 import { Induction } from './scene/induction3d.js';
@@ -1026,7 +1028,7 @@ export class EngineView {
       this.fxLight.position.copy(this.engine.localToWorld(this.tmp.copy(this.exhaust.tips[0])));
       this.fxLight.position.z -= 0.4;
     }
-    this.fxLight.intensity = this.fxLightLevel * 14;
+    this.fxLight.intensity = this.fxLightLevel * 4;
 
     this.updateDriveline(dt, sim, inputDeg, outputDeg);
     this.updateFailure(dt, sim);
@@ -1274,7 +1276,7 @@ export class EngineView {
       this.exhaust.flame(s);
       for (const tip of this.exhaust.tips) {
         const at = this.engine.localToWorld(this.tmp.copy(tip));
-        this.effects.sparkBurst(at, this.tmp2.set(0, 0.15, -1), Math.round(4 + 10 * s), 6 + 6 * s, 0.6, 0.1 * B);
+        this.effects.sparkBurst(at, this.tmp2.set(0, 0.15, -1), Math.round(3 + 6 * s), 6 + 6 * s, 0.6, 0.045 * B);
       }
     } else if (kind === 'bov') {
       const at = this.inductionHw.group.localToWorld(this.tmp.copy(this.inductionHw.bovPoint));

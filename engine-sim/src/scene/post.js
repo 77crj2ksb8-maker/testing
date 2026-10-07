@@ -9,6 +9,7 @@ import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
 import { ShaderPass } from 'three/addons/postprocessing/ShaderPass.js';
 import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
+import { untoneMapped } from './tonemap.js';
 
 export const BLOOM_LAYER = 1;
 
@@ -19,36 +20,6 @@ export function markBloom(obj) {
 }
 
 const BLOOM_SCALE = 0.5; // bloom pre-pass resolution relative to the canvas
-
-// three.js ACES filmic curve (tonemapping_pars_fragment), applied to a linear RGB triple.
-function aces(rgb, exposure, out) {
-  const k = exposure / 0.6;
-  const r = rgb[0] * k;
-  const g = rgb[1] * k;
-  const b = rgb[2] * k;
-  const i = [0.59719 * r + 0.35458 * g + 0.04823 * b, 0.076 * r + 0.90834 * g + 0.01566 * b, 0.0284 * r + 0.13383 * g + 0.83777 * b];
-  const f = i.map((v) => (v * (v + 0.0245786) - 0.000090537) / (v * (0.983729 * v + 0.432951) + 0.238081));
-  out[0] = 1.60475 * f[0] - 0.53108 * f[1] - 0.07367 * f[2];
-  out[1] = -0.10208 * f[0] + 1.10813 * f[1] - 0.00605 * f[2];
-  out[2] = -0.00327 * f[0] - 0.07276 * f[1] + 1.07602 * f[2];
-  return out;
-}
-
-/**
- * The linear colour that comes out of the tone mapper as `target`. The direct
- * render path clears to the background without tone mapping, the composer
- * path tone-maps it, so the composer gets this pre-compensated background.
- */
-export function untoneMapped(target, exposure) {
-  const t = [target.r, target.g, target.b];
-  const x = [...t];
-  const y = [0, 0, 0];
-  for (let n = 0; n < 60; n++) {
-    aces(x, exposure, y);
-    for (let c = 0; c < 3; c++) x[c] = Math.max(0, x[c] + (t[c] - y[c]) * 2.5);
-  }
-  return new THREE.Color(x[0], x[1], x[2]);
-}
 
 export class PostFX {
   constructor(renderer, scene, camera) {
@@ -133,7 +104,7 @@ export class PostFX {
     if (background?.isColor) {
       if (this.bgFor !== background.getHex()) {
         this.bgFor = background.getHex();
-        this.bg = untoneMapped(background, this.renderer.toneMappingExposure);
+        this.bg = new THREE.Color().fromArray(untoneMapped([background.r, background.g, background.b], this.renderer.toneMappingExposure));
       }
       scene.background = this.bg;
     }

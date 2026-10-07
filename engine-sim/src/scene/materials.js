@@ -155,11 +155,9 @@ export function makeFlameMaterial() {
       attribute float aFlame;
       varying float vFlame;
       varying float vY;
-      varying float vR;
       void main() {
         vFlame = aFlame;
         vY = position.y;
-        vR = length(position.xz);
         vec4 p = instanceMatrix * vec4(position, 1.0);
         gl_Position = projectionMatrix * modelViewMatrix * p;
       }`,
@@ -167,18 +165,16 @@ export function makeFlameMaterial() {
       uniform float uTime;
       varying float vFlame;
       varying float vY;
-      varying float vR;
       void main() {
         if (vFlame < 0.002) discard;
         // vY: 0 at the pipe, 1 at the tip. Blue-white core, orange body, red tip.
-        float flicker = 0.75 + 0.25 * sin(uTime * 60.0 + vY * 14.0);
-        float body = (1.0 - vY) * flicker;
-        vec3 core = vec3(0.75, 0.85, 1.0);
-        vec3 mid = vec3(1.0, 0.55, 0.12);
-        vec3 tip = vec3(0.9, 0.18, 0.04);
-        vec3 c = mix(mix(core, mid, smoothstep(0.0, 0.35, vY)), tip, smoothstep(0.45, 1.0, vY));
-        float edge = 1.0 - smoothstep(0.0, 1.0, vR * 2.2);
-        gl_FragColor = vec4(c * body * vFlame * (1.0 + edge) * 2.2, 1.0);
+        float flicker = 0.78 + 0.22 * sin(uTime * 60.0 + vY * 14.0);
+        float body = (1.0 - vY * 0.85) * flicker;
+        vec3 core = vec3(0.35, 0.45, 1.0);
+        vec3 mid = vec3(1.0, 0.38, 0.06);
+        vec3 tip = vec3(0.7, 0.1, 0.02);
+        vec3 c = mix(mix(core, mid, smoothstep(0.0, 0.3, vY)), tip, smoothstep(0.5, 1.0, vY));
+        gl_FragColor = vec4(c * body * vFlame, 1.0);
         #include <tonemapping_fragment>
         #include <colorspace_fragment>
       }`,

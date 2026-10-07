@@ -91,7 +91,11 @@ export class ExhaustSystem {
       can.scale(1.25, 0.8, 1);
       can.translate(x, run.y, run.endZ + 1.6 * B);
       pipeGeos.push(can);
-      const tip = cylAlongZ(0.17 * B, 0.5 * B, 20);
+      // Hollow tip: outer wall, rolled lip and a dark bore.
+      const tip = new THREE.LatheGeometry([
+        [0.13 * B, 0.25 * B], [0.13 * B, -0.25 * B], [0.15 * B, -0.27 * B], [0.17 * B, -0.25 * B], [0.17 * B, 0.25 * B],
+      ].map(([r, y]) => new THREE.Vector2(r, y)), 20);
+      tip.rotateX(Math.PI / 2);
       tip.translate(x, run.y, run.endZ - 0.1 * B);
       tipGeos.push(tip);
       this.tips.push(v3(x, run.y, run.endZ - 0.35 * B));
@@ -161,7 +165,7 @@ export class ExhaustSystem {
       this.aFlame.array[i] = f;
       const flick = 0.85 + 0.15 * Math.sin(this.time * 47 + i * 2.1);
       const len = f > 0.002 ? B * (0.7 + 2.6 * f) * flick : 0.0001;
-      const w = B * (0.28 + 0.3 * f);
+      const w = B * (0.22 + 0.18 * f);
       this.scale.set(w, len, w);
       this.flameOffset.copy(this.tips[i]).add(this.pipeGroup.position);
       this.m4.compose(this.flameOffset, this.flameQ, this.scale);

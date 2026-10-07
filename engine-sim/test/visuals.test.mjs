@@ -10,6 +10,8 @@ import {
   layoutOf, bankList, exhaustSide, bankToEngine, cylinderPlacement, explodeOffset, chainPath, pointOnPath,
 } from '../src/scene/layout.js';
 import { initialQuality, adaptQuality, SLOW_MS, FAST_MS } from '../src/scene/quality.js';
+import { acesFilmic, untoneMapped } from '../src/scene/tonemap.js';
+import { headDims } from '../src/scene/layout.js';
 
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
 const profile = (preset, cylinders) => buildProfile({ ...DEFAULT_SETTINGS, preset, cylinders });
@@ -236,4 +238,35 @@ test('quality policy: auto drops bloom before resolution and recovers in reverse
   assert.equal(low.maxPixelRatio, 1.5);
   adaptQuality(low, 5);
   assert.equal(low.bloom, false, 'low never blooms');
+});
+
+test('head layout: each cam sits on its valve axis above the bucket, with clearances', () => {
+  const B = 0.93;
+  const deck = 2.6;
+  const H = headDims(B, deck);
+  // Cam centre = valve seat + (stem + bucket + base circle) along the tilted valve axis.
+  const reach = H.stemLen + H.bucketH + H.baseR;
+  assert.ok(near(H.camX, H.valveX + reach * Math.sin(H.tilt), 1e-12));
+  assert.ok(near(H.camY, deck + reach * Math.cos(H.tilt), 1e-12));
+  // The two cam sprockets of a bank clear each other; the lobes clear the plug in the middle.
+  assert.ok(2 * H.camX > 2 * H.sprocketR, 'sprockets do not overlap');
+  assert.ok(H.camX - H.baseR - H.lift > 0.05 * B, 'lobes clear the spark plug');
+  // Valve heads fit the bore and do not touch each other.
+  assert.ok(Math.hypot(H.valveX, H.valveZ) + 0.17 * B < 0.5 * B);
+  assert.ok(2 * H.valveZ > 2 * 0.17 * B);
+  // Cam cover encloses the lobes; the ports are on the head wall.
+  assert.ok(H.top > H.camY + H.baseR + H.lift);
+  assert.ok(near(H.portX, H.width / 2, 1e-12));
+  // Springs never fully compress at full lift.
+  assert.ok(H.stemLen - H.lift - H.springSeat > 0.2 * B);
+});
+
+test('tone-map compensation: the composer background matches the direct path', () => {
+  const target = [0.0027, 0.0033, 0.0052]; // #090b10 in linear
+  const x = untoneMapped(target, 1.05);
+  const y = acesFilmic(x, 1.05, [0, 0, 0]);
+  for (let c = 0; c < 3; c++) assert.ok(Math.abs(y[c] - target[c]) < 1e-6, `channel ${c}: ${y[c]} vs ${target[c]}`);
+  assert.ok(x.every((v) => v >= target[0]), 'ACES darkens shadows, so the input is brighter');
+  const white = acesFilmic([20, 20, 20], 1, [0, 0, 0]);
+  assert.ok(white.every((v) => v > 0.95), 'highlights roll off to white');
 });
