@@ -364,10 +364,14 @@ const CSS = `
 
 /* Telemetry sections. */
 .mo-section h3 .mo-tag { margin-left: 6px; font-family: var(--font-data); font-size: 10px; font-weight: 500; color: var(--muted); }
-.mo-pv-row { display: grid; grid-template-columns: 1fr; gap: 0 14px; }
-@media (min-width: 640px) { .mo-pv-row { grid-template-columns: 1fr 1fr; } }
+/* Side by side only when the panel itself is wide (a container query, not the viewport). */
+.mo-pv { container-type: inline-size; }
+.mo-pv-row { display: grid; grid-template-columns: minmax(0, 1fr); gap: 0 14px; }
 .mo-chart-pv { height: 112px; }
-@media (min-width: 640px) { .mo-chart-pv { height: 150px; } }
+@container (min-width: 560px) {
+  .mo-pv-row { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .mo-chart-pv { height: 150px; }
+}
 .mo-ach-list { list-style: none; margin: 4px 0 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
 .mo-ach-list li { display: grid; grid-template-columns: 22px 1fr; gap: 8px; align-items: start; padding: 7px 9px; border-radius: 9px; background: var(--raise); min-width: 0; }
 .mo-ach-list b { display: block; font-size: 13px; font-weight: 700; line-height: 1.2; }
@@ -739,7 +743,7 @@ export default {
       const now = el('p', { class: 'chart-readout' });
       const pCanvas = el('canvas', { class: 'chart mo-chart-pv', 'aria-label': 'Cylinder 1 pressure against crank angle, with the current crank angle marked' });
       const vCanvas = el('canvas', { class: 'chart mo-chart-pv', 'aria-label': 'Cylinder 1 pressure against volume (log scale), with the current point marked' });
-      const root = el('section', { class: 'mo-section chart-block', 'aria-label': 'Cylinder pressure' },
+      const root = el('section', { class: 'mo-section mo-pv chart-block', 'aria-label': 'Cylinder pressure' },
         el('div', { class: 'chart-head' }, el('h3', {}, 'Cylinder pressure ', el('span', { class: 'chart-unit', text: 'bar · cyl 1' })), readout),
         el('div', { class: 'mo-pv-row' },
           el('div', {}, pCanvas),
