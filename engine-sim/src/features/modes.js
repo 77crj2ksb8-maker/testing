@@ -595,7 +595,7 @@ export default {
     function placeOverlays() {
       placeQueued = 0;
       if (!dragUi.root.hidden) placeCard(dragUi.root, 250, 420, 120);
-      if (!slipUi.root.hidden) placeCard(slipUi.root, 224, 300, 190);
+      if (!slipUi.root.hidden) placeCard(slipUi.root, 200, 300, 190);
     }
     const queuePlacement = () => {
       if (!placeQueued && (!dragUi.root.hidden || !slipUi.root.hidden)) placeQueued = requestAnimationFrame(placeOverlays);
