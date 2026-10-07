@@ -287,18 +287,18 @@ output { font-variant-numeric: tabular-nums; }
   top: calc(var(--hud-top-h, 120px) + 10px);
   display: grid;
   grid-auto-flow: column;
-  grid-template-rows: repeat(var(--rail-rows, 6), 44px);
-  grid-auto-columns: 44px;
-  gap: 8px;
+  grid-template-rows: repeat(var(--rail-rows, 6), var(--rail-btn, 44px));
+  grid-auto-columns: var(--rail-btn, 44px);
+  gap: var(--rail-gap, 8px);
   direction: rtl;
   z-index: 2;
   pointer-events: none;
 }
 .tool-rail > * { pointer-events: auto; direction: ltr; }
 /* Landscape: a grid under the top-right buttons, filled row by row. */
-.tool-rail.is-rows { grid-auto-flow: row; grid-template-rows: none; grid-template-columns: repeat(var(--rail-cols, 3), 44px); }
+.tool-rail.is-rows { grid-auto-flow: row; grid-template-rows: none; grid-template-columns: repeat(var(--rail-cols, 3), var(--rail-btn, 44px)); }
 .tool-rail:empty { display: none; }
-.tool-rail .tool-btn { width: 44px; height: 44px; }
+.tool-rail .tool-btn { width: var(--rail-btn, 44px); height: var(--rail-btn, 44px); }
 .tool-btn[data-mode='xray'] svg, .tool-btn[data-mode='cutaway'] svg { stroke: var(--clutch); }
 .tool-btn[data-mode='xray'], .tool-btn[data-mode='cutaway'] { border-color: var(--clutch); }
 .tool-btn[aria-pressed='true'] { border-color: var(--throttle); }
@@ -333,6 +333,8 @@ output { font-variant-numeric: tabular-nums; }
   transition: opacity 160ms, transform 160ms;
 }
 .toast.is-on { opacity: 1; transform: translate(-50%, 0); }
+/* With the stall card up, toasts sit under it instead of crowding its top edge. */
+#app:has(#stall:not([hidden])) .toast { top: var(--toast-under-stall, var(--toast-top)); }
 .toast.is-warn { border-color: var(--amber); }
 .toast.is-bad { border-color: var(--red); color: #ffd9d9; }
 .toast.is-good { border-color: var(--good); }
@@ -882,6 +884,12 @@ output { font-variant-numeric: tabular-nums; }
   .shifter, .paddles { width: 118px; }
   .paddles { aspect-ratio: 1 / 1.02; }
   .sheet { max-height: 100%; border-radius: 16px 16px 0 0; }
+}
+
+/* Very short landscape (a phone in the browser with toolbars showing): drop the
+   secondary lines so the tool rail gets a second row above the pedals. */
+@media (max-height: 420px) and (orientation: landscape) {
+  .profile-speed, .shifter-wrap .hint, .pedal-wrap .hint { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -49,7 +49,7 @@ export default {
     });
     // Stroke labels stay off the HUD cards, tool rail and controls. Measured
     // only when the layout changes, never per frame.
-    const BLOCKERS = '.tach, .hud-right, .tool-rail, .hud-bottom > *';
+    const BLOCKERS = '.tach, .hud-right, .tool-rail, .hud-bottom > *, #scrub:not([hidden])';
     bus.on('layout', () => {
       const canvas = view.renderer?.domElement;
       if (!canvas || !view.setLabelBlockers) return;

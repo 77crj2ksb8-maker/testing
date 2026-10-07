@@ -12,7 +12,8 @@ import { scrubPeriod, stepFiring, lastFired, nextDisplayMode, displayModeOf, DIS
 const $ = (id) => document.getElementById(id);
 const mod = (a, n) => ((a % n) + n) % n;
 
-const RAIL_BTN = 44; // px, matches .tool-rail .tool-btn
+const RAIL_BTN = 44; // px, default size of .tool-rail .tool-btn (--rail-btn)
+const RAIL_MIN = 38; // smallest the rail buttons shrink to when space is short
 const RAIL_GAP = 8;
 const TOAST_SLOT = 64; // px kept clear under the toast's top edge (two lines)
 
@@ -211,12 +212,26 @@ export default {
       const top = right.bottom + 10;
       let limit = pedals.top - 10;
       if (!scrub.hidden && !landscape) limit = Math.min(limit, scrub.getBoundingClientRect().top - 10);
-      const rows = Math.max(1, Math.floor((limit - top + RAIL_GAP) / (RAIL_BTN + RAIL_GAP)));
       const count = rail.children.length;
+      // Buttons shrink (44 → 38 px) before the rail spills sideways: in portrait
+      // until every button fits one column, in landscape until there are two
+      // rows, so a long single row never squeezes the centre column shut.
+      const fit = (b, g) => Math.max(1, Math.floor((limit - top + g) / (b + g)));
+      let btn = RAIL_BTN;
+      let gap = RAIL_GAP;
+      let rows = fit(btn, gap);
+      const wantRows = landscape ? Math.min(2, count) : count;
+      for (let b = RAIL_BTN - 2; b >= RAIL_MIN && rows < wantRows; b -= 2) {
+        btn = b;
+        gap = 6;
+        rows = fit(btn, gap);
+      }
       const cols = Math.max(1, Math.ceil(count / rows));
       rail.style.top = `${Math.round(top)}px`;
       // Portrait: a vertical rail. Landscape: rows under the top-right buttons.
       rail.classList.toggle('is-rows', landscape);
+      root.setProperty('--rail-btn', `${btn}px`);
+      root.setProperty('--rail-gap', `${gap}px`);
       root.setProperty('--rail-rows', String(Math.min(rows, Math.max(1, count))));
       root.setProperty('--rail-cols', String(cols));
 

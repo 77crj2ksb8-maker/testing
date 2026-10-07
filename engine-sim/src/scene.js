@@ -1017,6 +1017,11 @@ export class EngineView {
   }
 
   /** Camera preset names, in cycle order. */
+  /** Id of the camera preset the view is on (or last flew to). */
+  get cameraPreset() {
+    return this.rig?.active ?? 'hero';
+  }
+
   get cameraPresets() {
     return CAMERA_PRESETS;
   }

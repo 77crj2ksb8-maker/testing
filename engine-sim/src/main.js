@@ -86,6 +86,22 @@ const settingsPanel = new SettingsPanel((patch, kind) => app.apply(patch, kind))
 
 // ── The shared app context handed to every feature ──────────────────────────
 let toastTimer = 0;
+let toastKind = '';
+let toastShownAt = 0;
+const toastQueue = [];
+function showToast(message, kind, ms) {
+  const t = $('toast');
+  t.textContent = message;
+  t.className = `toast is-on${kind ? ` is-${kind}` : ''}`;
+  toastKind = kind;
+  toastShownAt = performance.now();
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => {
+    t.classList.remove('is-on');
+    const next = toastQueue.shift();
+    if (next) setTimeout(() => showToast(next.message, next.kind, next.ms), 180);
+  }, ms);
+}
 const app = {
   bus, sim, gearbox, tracker, stats, audio, view, pedals, shifter, telemetry, settingsPanel,
   get settings() { return settings; },
@@ -101,11 +117,15 @@ const app = {
   viewState: { frozen: false, scrubDeg: null, crankDeg: 0, inputDeg: 0, outputDeg: 0 },
 
   toast(message, kind = '', ms = 1900) {
-    const t = $('toast');
-    t.textContent = message;
-    t.className = `toast is-on${kind ? ` is-${kind}` : ''}`;
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => t.classList.remove('is-on'), ms);
+    // A routine message (an achievement, a garage load) waits rather than cut
+    // short a warning the driver has only just seen.
+    const on = $('toast').classList.contains('is-on');
+    const guarded = on && (toastKind === 'bad' || toastKind === 'warn') && kind !== 'bad' && performance.now() - toastShownAt < 1500;
+    if (guarded) {
+      if (toastQueue.length < 3 && !toastQueue.some((q) => q.message === message)) toastQueue.push({ message, kind, ms });
+      return;
+    }
+    showToast(message, kind, ms);
   },
 
   /** Merge a settings patch, persist it and push it to every consumer. kind: see CONTRACT.md. */
@@ -124,7 +144,7 @@ const app = {
       if (key !== geometryKey) {
         geometryKey = key;
         view.setProfile(profile, drive, settings);
-        layout();
+        layout({ reframe: true });
       }
       if (profile.id !== soundKey) {
         soundKey = profile.id;
@@ -380,7 +400,10 @@ $('scene').addEventListener('pointerup', (e) => {
 });
 
 // ── Layout ──────────────────────────────────────────────────────────────────
-function layout() {
+// Reframes the camera only when the viewport size or the model changed, so a
+// HUD card growing (a gauge appearing) never snaps the camera or an orbit.
+let lastLayoutSize = '';
+function layout(opts = {}) {
   const root = $('app');
   const w = root.clientWidth;
   const h = root.clientHeight;
@@ -414,7 +437,10 @@ function layout() {
     insets = w - 2 * side > w * 0.35 ? { top: top * 0.25, bottom: 0, left: side, right: side } : { top: top * 0.25, bottom: 0 };
   }
   view.resize(w, h, insets);
-  view.frameModel(!userMovedCamera);
+  const sizeKey = `${w}x${h}`;
+  const reframe = opts.reframe === true || sizeKey !== lastLayoutSize;
+  lastLayoutSize = sizeKey;
+  view.frameModel(reframe && !userMovedCamera);
   bus.emit('layout', { width: w, height: h, landscape });
 }
 app.layout = layout;
@@ -506,7 +532,7 @@ if (debugMode) {
 }
 
 app.apply({}, 'all');
-layout();
+layout({ reframe: true });
 requestAnimationFrame((t) => {
   last = t;
   frame(t);

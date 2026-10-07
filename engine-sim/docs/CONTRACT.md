@@ -162,7 +162,7 @@ From the integrator: `gear {from, to}`, `grind {gear, reason, mismatchRpm}`,
 `settings {settings, kind, patch}`, `profile {profile, drive}`, `repair {}`,
 `session-reset {}`, `escape {}`, `key {key, event}` (unbound keys), `layout {width, height, landscape}`.
 
-From modes (track E): `drag:stage`, `drag:green`, `drag:foul`, `drag:finish {result}`,
+From modes (track E): `drag:stage`, `drag:green`, `drag:foul`, `drag:abort {reason}`, `drag:finish {result}`,
 `dyno:start`, `dyno:done {peakHp, peakNm, peakHpRpm, peakNmRpm}`, `achievement {id, title}`.
 
 ## 4. Settings (`app.settings`, defaults in `DEFAULT_SETTINGS`, src/config.js)
@@ -381,3 +381,22 @@ Owns: `src/modes/`, `src/pv.js`, `src/achievements.js`, `src/features/modes.js`,
    commit with a clear message. Never commit `node_modules` or `dist/`.
 3. Report: branch, commit, what you built, what you verified, known gaps, and
    integration requests for other tracks.
+
+## 9. Additions made during implementation
+
+These landed while the tracks were built and are now part of the contract.
+
+- **Simulator:** `blownCause` (`'over-rev' | 'overheat' | null`), `launchArmed` (two-step armed but not yet
+  cutting), `overrevGrace` (set by `setProfile`/`setDrive` so a settings change under a revving engine is
+  not counted as a mechanical over-rev), `induction.multiplier`, `induction.exhaustLoad`. Coolant is capped at
+  `COOLANT_BOIL_C` (130 °C, `src/thermal.js`). A stopped or blown engine reads 0 bar manifold pressure.
+- **Config:** `peakFigures(profile) → {nm, nmRpm, hp, hpRpm}`, `layoutOf(profile)`, `naTorque(profile, rpm, highCam)`.
+- **Gearbox:** `gearbox.shift` (`{from, to, source}` while a sequential/auto shift is in flight);
+  `shiftUp()`/`shiftDown()` return `{ok, gear, queued?, pending?, reason?}`.
+- **Actions:** `loadGarage(id)` (powertrain), `openGarage()` / `closeGarage()` (HUD).
+- **View:** `cameraPreset` (active preset id), `cinematic` (getter), optional `insets.left/right` in `resize()`.
+- **Events:** `drag:abort {reason}`; `vvl {on:false}` is emitted before `blown` if the high cam was engaged.
+- **Keys:** the HUD uses F (freeze) and `[` / `]` (previous/next firing while frozen); E/Q shift the sequential box.
+- **Layout hooks:** features that cover the 3D view measure `.tach, .hud-right, .tool-rail, .shifter-wrap,
+  .pedal-wrap, .hud-bottom > *` on the `layout` event; anything that resizes those cards should call
+  `app.layout()`, which re-measures without moving the camera unless the viewport size changed.

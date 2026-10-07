@@ -685,6 +685,10 @@ export class Hud {
         this.setText('start', copy.button);
         el.start.disabled = !sim.blown && !ready;
         el.stall.classList.toggle('is-blown', !!sim.blown);
+        // While the card shows, toasts drop below it (styles.css): measure it
+        // once per change of copy rather than every frame.
+        const r = el.stall.getBoundingClientRect();
+        document.documentElement.style.setProperty('--toast-under-stall', `${Math.round(r.bottom + 8)}px`);
       }
     } else this.stallKey = '';
   }

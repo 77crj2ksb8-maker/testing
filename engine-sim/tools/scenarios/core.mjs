@@ -38,8 +38,12 @@ export default async function core({ evaluate, advance, shot, expect, tap }) {
   expect(!s.running, 'dumping the clutch at idle stalls');
   await shot('core-stalled');
   await advance(0.2, { clutch: 1 });
-  await evaluate(() => window.__app.actions.startEngine());
-  s = await advance(2.5, { clutch: 1 });
+  // Start and crank in one evaluate: a live frame in between would run with the
+  // real pedals (clutch up, in gear) and could fight the starter.
+  s = await evaluate(() => {
+    window.__app.actions.startEngine();
+    return window.__app.debugApi.advance(2.5, { clutch: 1 });
+  });
   expect(s.running, 'restarts with the clutch down');
   // Hand back to the live frame loop in neutral (its pedals are all up).
   await evaluate(() => window.__app.actions.selectGear('N', 'test'));
