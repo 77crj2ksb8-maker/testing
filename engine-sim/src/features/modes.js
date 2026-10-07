@@ -320,6 +320,9 @@ const CSS = `
 .mo-slip-actions .text-btn { border-color: rgba(9, 11, 16, 0.35); color: var(--bg); }
 
 /* Dyno: a sheet over the driving controls (the car is strapped down). */
+.mo-scrim { position: absolute; inset: var(--hud-top-h, 120px) 0 0; background: rgba(5, 7, 10, 0.55); pointer-events: none !important; }
+.mo-scrim[hidden] { display: none; }
+@media (orientation: landscape) { .mo-scrim { display: none; } }
 .mo-dyno {
   left: calc(var(--safe-left) + var(--gutter));
   right: calc(var(--safe-right) + var(--gutter));
@@ -468,7 +471,9 @@ export default {
     const dynoUi = buildDynoUi();
     const pvUi = buildPvUi();
     const achUi = buildAchievementsUi();
-    overlay.append(dragUi.root, slipUi.root, dynoUi.root);
+    // Portrait: the dyno sheet covers the driving controls, so dim them behind it.
+    const scrim = el('div', { class: 'mo-scrim', hidden: true, 'aria-hidden': 'true' });
+    overlay.append(dragUi.root, slipUi.root, scrim, dynoUi.root);
     app.ui.addTelemetrySection(pvUi.root, 60);
     app.ui.addTelemetrySection(achUi.root, 70);
 
@@ -909,6 +914,7 @@ export default {
       dyno.chartsDirty = true;
       dynoBtn.setAttribute('aria-pressed', 'true');
       dynoUi.root.hidden = false;
+      scrim.hidden = false;
     }
 
     function mountRollers() {
@@ -949,6 +955,7 @@ export default {
       dyno.snapshot = null;
       dynoBtn.setAttribute('aria-pressed', 'false');
       dynoUi.root.hidden = true;
+      scrim.hidden = true;
     }
 
     function startPull() {
