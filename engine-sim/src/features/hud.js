@@ -217,22 +217,34 @@ export default {
       rail.classList.toggle('is-rows', landscape);
       root.setProperty('--rail-rows', String(Math.min(rows, Math.max(1, count))));
       root.setProperty('--rail-cols', String(cols));
-      const railW = cols * RAIL_BTN + (cols - 1) * RAIL_GAP;
-      root.setProperty('--rail-w', `${railW}px`);
 
-      // Toast: centred under the tach in portrait, in the top centre gap in
-      // landscape. The stall card starts below a two-line toast's slot.
-      let toastTop;
-      if (landscape) {
-        const cx = w / 2;
-        const half = Math.min(cx - tachRect.right, right.left - cx) - 12;
-        toastTop = tachRect.top;
-        root.setProperty('--toast-max', `${Math.max(200, Math.round(half * 2))}px`);
-      } else {
-        toastTop = tachRect.bottom + 8;
-        root.setProperty('--toast-max', `${Math.round(w - 2 * (14 + railW + 8))}px`);
-      }
+      // Half-width around the centre line that stays clear of the HUD cards
+      // and of any rail button overlapping the vertical band [top, bottom].
+      const cx = w / 2;
+      const obstacles = [tachRect, right, ...[...rail.children].map((b) => b.getBoundingClientRect())];
+      const clearHalf = (top, bottom) => {
+        let half = cx - 14;
+        for (const r of obstacles) {
+          if (!r.width || r.bottom <= top || r.top >= bottom) continue;
+          if (r.left >= cx) half = Math.min(half, r.left - cx - 8);
+          else if (r.right <= cx) half = Math.min(half, cx - r.right - 8);
+        }
+        return Math.max(80, half);
+      };
+
+      // Toast: under the tach in portrait, in the top centre gap in landscape.
+      // The stall card starts below a two-line toast's slot.
+      const toastTop = landscape ? tachRect.top : tachRect.bottom + 8;
       root.setProperty('--toast-top', `${Math.round(toastTop)}px`);
+      root.setProperty('--toast-max', `${Math.round(2 * clearHalf(toastTop, toastTop + TOAST_SLOT))}px`);
+      // Landscape: centred in the free middle column. Portrait: kept clear of the lever and pedals.
+      const stallTop = landscape
+        ? Math.max(toastTop + TOAST_SLOT, h / 2 - 95)
+        : Math.min(toastTop + TOAST_SLOT, Math.min(lever.top, pedals.top) - 210);
+      root.setProperty('--stall-top', `${Math.round(stallTop)}px`);
+      root.setProperty('--stall-w', `${Math.round(Math.min(300, 2 * clearHalf(stallTop, stallTop + 210)))}px`);
+
+      // Landscape telemetry: the free centre column between the tach + lever and the rail + pedals.
       if (landscape) {
         const railRect = rail.getBoundingClientRect();
         const leftEdge = Math.max(tachRect.right, lever.right) + 12;
@@ -240,11 +252,6 @@ export default {
         root.setProperty('--centre-l', `${Math.round(leftEdge)}px`);
         root.setProperty('--centre-r', `${Math.round(w - rightEdge)}px`);
       }
-      // Landscape: centred in the free middle column. Portrait: kept clear of the lever and pedals.
-      const stallTop = landscape
-        ? Math.max(toastTop + TOAST_SLOT, h / 2 - 95)
-        : Math.min(toastTop + TOAST_SLOT, Math.min(lever.top, pedals.top) - 210);
-      root.setProperty('--stall-top', `${Math.round(stallTop)}px`);
     }
 
     // ── Bus wiring ──────────────────────────────────────────────────────────

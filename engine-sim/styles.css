@@ -344,8 +344,8 @@ output { font-variant-numeric: tabular-nums; }
   /* Below the toast's slot (JS sets --stall-top); 46% centre as a fallback. */
   top: var(--stall-top, 30%);
   transform: translateX(-50%);
-  /* Narrow enough to clear the tool rail on either side. */
-  width: min(300px, calc(100% - 2 * (var(--gutter) + var(--rail-w, 0px) + 8px)));
+  /* Narrow enough to clear the tool rail on either side (JS sets --stall-w). */
+  width: var(--stall-w, min(300px, calc(100% - 2 * var(--gutter))));
   padding: 16px;
   border-radius: var(--radius);
   background: var(--panel-solid);
@@ -875,6 +875,7 @@ output { font-variant-numeric: tabular-nums; }
   .hud-extra { margin-top: 6px; }
   /* The free centre column between the tach + lever and the rail + pedals (set from JS). */
   .telemetry { top: calc(var(--safe-top) + 10px); left: var(--centre-l, 280px); right: var(--centre-r, 280px); max-width: none; margin: 0; bottom: calc(var(--safe-bottom) + 10px); }
+  .telemetry .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .pedal { height: 96px; }
   .pedal-gas { height: 108px; }
   .pedal-brake { height: 78px; }

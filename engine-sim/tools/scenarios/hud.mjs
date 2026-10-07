@@ -110,12 +110,28 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
   l = await leds(shiftAt + 10);
   expect(l.flash && l.anim === 'none', `reduced motion: steady blue, no strobe (${l.anim})`);
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  l = await leds(shiftAt - 200);
-  await evaluate(() => (window.__app.pedals.gas.keyHeld = 1));
-  await page.waitForTimeout(900);
-  await shot('hud-shift-lights');
-  await evaluate(() => (window.__app.pedals.gas.keyHeld = 0));
-  await advance(2, {});
+  // Screenshots: pose the HUD at an rpm and hold it (headless frames are too
+  // rare to catch a live rev, and would land mid-transition).
+  const pose = (rpm) => evaluate((r) => {
+    const a = window.__app;
+    const s = a.sim;
+    a.hud.update = a.hud.constructor.prototype.update;
+    const saved = s.omega;
+    s.omega = (r * Math.PI) / 30;
+    a.hud.update(0);
+    s.omega = saved;
+    a.hud.update = () => {};
+  }, rpm);
+  const release = () => evaluate(() => delete window.__app.hud.update);
+  await page.addStyleTag({ content: '.led { transition: none !important; }' });
+  await pose(shiftAt - 700);
+  await shot('hud-shift-lights-climb');
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await pose(shiftAt + 20);
+  await shot('hud-shift-lights-flash');
+  await page.emulateMedia({ reducedMotion: 'no-preference' });
+  await release();
+  await advance(1, {});
 
   // ── Five-digit revs with the limiter pill never overflow the tach ────────
   for (const vp of [VIEWPORTS[0], VIEWPORTS[3]]) {
@@ -376,4 +392,47 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
     await advance(2, {});
   }
   expect(await evaluate(() => window.__app.sim.running), 'engine running again after the rebuild');
+
+  // ── A full rail (the modes track adds two more buttons) ──────────────────
+  await evaluate(() => {
+    const a = window.__app;
+    const icon = '<svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="7"/></svg>';
+    a.ui.addToolButton({ id: 'extra-a', label: 'Extra A', icon, order: 60, onClick() {} });
+    a.ui.addToolButton({ id: 'extra-b', label: 'Extra B', icon, order: 65, onClick() {} });
+  });
+  for (const vp of VIEWPORTS) {
+    await page.setViewportSize({ width: vp.width, height: vp.height });
+    await settle();
+    await checkLayout(`${vp.width}×${vp.height} with 8 rail buttons`);
+    await evaluate(() => {
+      window.__app.sim.blowUp('over-rev');
+      window.__app.toast('Over-revved to 10,450 rpm. Engine health 0 %.', 'bad', 6000);
+      window.__app.hud.update(0);
+    });
+    await settle();
+    const clear = await evaluate(() => {
+      const r = (n) => n.getBoundingClientRect();
+      const stall = r(document.getElementById('stall'));
+      const toast = r(document.getElementById('toast'));
+      const hits = (a, b) => a.left < b.right && b.left < a.right && a.top < b.bottom && b.top < a.bottom;
+      const buttons = [...document.querySelectorAll('#tool-rail .tool-btn')].map(r);
+      return {
+        stallW: Math.round(stall.width),
+        stallHits: buttons.filter((b) => hits(b, stall)).length,
+        toastHits: buttons.filter((b) => hits(b, toast)).length,
+        toastStall: hits(toast, stall),
+        stallOnControls: ['.shifter-wrap', '.pedal-wrap', '.tach'].some((s) => hits(r(document.querySelector(s)), stall)),
+      };
+    });
+    expect(clear.stallW >= 230 && !clear.stallHits && !clear.toastHits && !clear.toastStall && !clear.stallOnControls,
+      `${vp.width}×${vp.height}: stall card (${clear.stallW} px) and toast clear of the rail, each other and the controls (${JSON.stringify(clear)})`);
+    await shot(`hud-fullrail-${vp.name}`);
+    await evaluate(() => window.__app.actions.startEngine());
+  }
+  await evaluate(() => {
+    document.getElementById('tool-extra-a').remove();
+    document.getElementById('tool-extra-b').remove();
+    window.__app.actions.startEngine();
+  });
+  await advance(2, {});
 }
