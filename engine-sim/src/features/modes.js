@@ -501,16 +501,14 @@ export default {
     const COMFY_W = 330; // px: wider than this is nice to have, not worth moving down for
     const railEl = app.ui.toolRail ?? document.getElementById('tool-rail');
 
-    function obstacles(origin, withRail) {
+    function rectsOf(nodes, origin) {
       const out = [];
-      const add = (node) => {
-        if (!node || node.hidden) return;
+      for (const node of nodes) {
+        if (!node || node.hidden) continue;
         const r = node.getBoundingClientRect();
-        if (!r.width || !r.height) return;
+        if (!r.width || !r.height) continue;
         out.push({ l: r.left - origin.left - CLEAR, r: r.right - origin.left + CLEAR, t: r.top - origin.top - CLEAR, b: r.bottom - origin.top + CLEAR });
-      };
-      for (const sel of HARD) add(document.querySelector(sel));
-      if (withRail && railEl) for (const b of railEl.children) add(b);
+      }
       return out;
     }
 
@@ -535,10 +533,17 @@ export default {
         const w = Math.min(w1, g.r - g.l);
         if (w < w0) continue;
         const score = Math.min(w, COMFY_W) + 0.15 * Math.max(0, w - COMFY_W) - 0.4 * (y - area.t);
-        if (!best || score > best.score) best = { score, x: g.l + (g.r - g.l - w) / 2, y, w };
+        if (!best || score > best.score) best = { score, x: g.l + (g.r - g.l - w) / 2, y, w, gl: g.l, gr: g.r };
         if (w >= w1) break;
       }
       return best;
+    }
+
+    /** Overlap area of a box with a list of rects. */
+    function overlapArea(x, y, w, h, rects) {
+      let sum = 0;
+      for (const o of rects) sum += Math.max(0, Math.min(x + w, o.r) - Math.max(x, o.l)) * Math.max(0, Math.min(y + h, o.b) - Math.max(y, o.t));
+      return sum;
     }
 
     function placeCard(node, w0, w1, minH) {
@@ -546,22 +551,38 @@ export default {
       const sa = safeArea.getBoundingClientRect();
       const area = { l: sa.left - origin.left, r: sa.right - origin.left, t: sa.top - origin.top, b: sa.bottom - origin.top };
       const maxW = Math.min(w1, area.r - area.l);
-      node.style.maxHeight = '';
-      node.style.width = `${maxW}px`;
-      let h = node.offsetHeight;
+      const minW = Math.min(w0, maxW);
+      const heightAt = (w) => {
+        node.style.width = `${w}px`;
+        return node.offsetHeight;
+      };
+      node.style.maxHeight = 'none';
+      const full = heightAt(maxW);
+      const hard = rectsOf(HARD.map((sel) => document.querySelector(sel)), origin);
+      const rail = railEl ? rectsOf(railEl.children, origin) : [];
+      const all = hard.concat(rail);
+      // Full height clear of everything, then full height over the rail, then
+      // shorter (the card scrolls) in the same order.
       let spot = null;
-      for (const withRail of [true, false]) {
-        for (let hh = h; !spot && hh >= Math.min(h, minH); hh -= 30) {
-          spot = findSpot(area, obstacles(origin, withRail), Math.min(w0, maxW), maxW, hh);
-          if (spot && spot.w < maxW) {
-            // Narrower than measured: the text may wrap, so check the height again.
-            node.style.width = `${spot.w}px`;
-            const taller = node.offsetHeight;
-            if (taller > hh) spot = findSpot(area, obstacles(origin, withRail), spot.w, spot.w, taller);
+      let h = full;
+      search: for (let hh = full; hh >= Math.min(full, minH); hh -= 30) {
+        for (const obs of [all, hard]) {
+          let s = findSpot(area, obs, minW, maxW, hh);
+          if (s && s.w < maxW && hh === full) {
+            const need = heightAt(s.w); // narrower than measured: lines may wrap
+            if (need > hh) s = findSpot(area, obs, s.w, s.w, need);
+            if (s) hh = Math.max(hh, need);
           }
-          if (spot) h = Math.min(h, hh);
+          if (!s) continue;
+          if (obs === hard && rail.length) {
+            // Over the rail: slide along the free span to cover as few buttons as possible.
+            const xs = [s.gl, s.x, s.gr - s.w];
+            s.x = xs.reduce((best, x) => (overlapArea(x, s.y, s.w, hh, rail) < overlapArea(best, s.y, s.w, hh, rail) ? x : best), s.x);
+          }
+          spot = s;
+          h = hh;
+          break search;
         }
-        if (spot) break;
       }
       if (!spot) spot = { x: area.l, y: area.t, w: maxW }; // nothing clears: top left, scrolling
       node.style.left = `${Math.round(spot.x)}px`;
