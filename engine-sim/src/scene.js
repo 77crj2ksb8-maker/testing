@@ -996,6 +996,11 @@ export class EngineView {
     return this.rig.label(id, this.profile?.kind === 'rotary');
   }
 
+  /** Screen rects (canvas CSS px) that stroke labels must not sit under, e.g. the HUD cards. */
+  setLabelBlockers(rects) {
+    this.labels.setBlockers(rects);
+  }
+
   /** Slow automatic orbit; any user camera input turns it off. */
   setCinematic(on) {
     this.rig.setCinematic(on);

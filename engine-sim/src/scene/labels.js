@@ -34,7 +34,20 @@ export class StrokeLabels {
     this.layer.hidden = true;
     canvas.insertAdjacentElement('afterend', this.layer);
     this.chips = [];
+    this.blockers = [];
     this.v = new THREE.Vector3();
+  }
+
+  /** Screen rects the chips must stay off (HUD cards, pedals), canvas CSS px: [{left, top, right, bottom}]. */
+  setBlockers(rects) {
+    this.blockers = rects ?? [];
+  }
+
+  covered(x, y, w) {
+    for (const r of this.blockers) {
+      if (x + w / 2 > r.left && x - w / 2 < r.right && y + CHIP_H / 2 > r.top && y - CHIP_H / 2 < r.bottom) return true;
+    }
+    return false;
   }
 
   /** One chip per cylinder (or rotor), labelled with its number. */
@@ -101,7 +114,8 @@ export class StrokeLabels {
       const x = Math.round(c.tx);
       const y = Math.round(c.ty);
       // Never draw over the HUD bars or off the edges.
-      const off = !c.front || y < insets.top + 10 || y > height - insets.bottom - 10 || x < c.w / 2 + 4 || x > width - c.w / 2 - 4;
+      const off = !c.front || y < insets.top + 10 || y > height - insets.bottom - 10 || x < c.w / 2 + 4 || x > width - c.w / 2 - 4
+        || this.covered(x, y, c.w);
       if (x !== c.x || y !== c.y) {
         c.x = x;
         c.y = y;

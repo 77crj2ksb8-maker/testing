@@ -23,7 +23,8 @@ export function planExhaust(groups, B, { mid = false } = {}) {
     const zs = g.ports.map((p) => p.z);
     const z = mid ? (Math.min(...zs) + Math.max(...zs)) / 2 : Math.min(...zs) - 0.35 * B;
     const collector = mean.clone().addScaledVector(g.out, 1.0 * B);
-    collector.y -= 1.25 * B;
+    // Drop below the block; a boxer's ports already face down.
+    collector.y -= (Math.abs(g.out.y) > 0.9 ? 0.25 : 1.25) * B;
     collector.z = z;
     return { ...g, collector };
   });

@@ -47,6 +47,20 @@ export default {
     bus.on('profile', () => {
       if (app.sim.blown && !view.isBlown) view.blowUp?.();
     });
+    // Stroke labels stay off the HUD cards, tool rail and controls. Measured
+    // only when the layout changes, never per frame.
+    const BLOCKERS = '.tach, .hud-right, .tool-rail, .hud-bottom > *';
+    bus.on('layout', () => {
+      const canvas = view.renderer?.domElement;
+      if (!canvas || !view.setLabelBlockers) return;
+      const base = canvas.getBoundingClientRect();
+      const rects = [];
+      for (const node of document.querySelectorAll(BLOCKERS)) {
+        const r = node.getBoundingClientRect();
+        if (r.width && r.height) rects.push({ left: r.left - base.left, top: r.top - base.top, right: r.right - base.left, bottom: r.bottom - base.top });
+      }
+      view.setLabelBlockers(rects);
+    });
     return {};
   },
 };

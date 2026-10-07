@@ -89,6 +89,16 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   expect(vt.visible && vt.chips === 8, `frozen view shows a stroke label per cylinder (${vt.chips})`);
   expect(vt.words.some((w) => /Power/.test(w)) && vt.words.some((w) => /Intake/.test(w)), `labels name the strokes (${vt.words.join(', ')})`);
   expect(Math.abs(vt.camRot - (-vt.crank / 2) * Math.PI / 180) < 1e-6, 'cams turn at half crank speed');
+  const clash = await evaluate(() => {
+    const hud = [...document.querySelectorAll('.tach, .hud-right, .tool-rail, .hud-bottom > *')].map((n) => n.getBoundingClientRect());
+    const shown = [...document.querySelectorAll('.stroke-chip')].filter((c) => c.style.opacity !== '0');
+    const hits = shown.filter((c) => {
+      const r = c.getBoundingClientRect();
+      return hud.some((h) => h.width && r.right > h.left && r.left < h.right && r.bottom > h.top && r.top < h.bottom);
+    });
+    return { shown: shown.length, hits: hits.map((c) => c.textContent) };
+  });
+  expect(clash.shown > 0 && clash.hits.length === 0, `stroke labels stay off the HUD (${clash.shown} shown, overlapping: ${clash.hits.join(', ') || 'none'})`);
   await shot('vis-valvetrain-labels');
   await evaluate(() => { window.__app.viewState.scrubDeg = null; });
   const hidden = await until(() => document.querySelector('.stroke-labels').hidden);
