@@ -22,7 +22,8 @@ export class Induction {
     const { kind, B, M, ports } = ctx;
     this.kind = kind;
     this.B = B;
-    this.group = new THREE.Group(); // explodes upwards
+    this.group = new THREE.Group(); // plenum (and blower): explodes upwards
+    this.kit = null; // turbos, intercooler and charge piping: explodes forwards
     this.belt = null;
     this.metal = [];
     this.housings = [];
@@ -66,6 +67,7 @@ export class Induction {
     const intake = new THREE.Mesh(merge(geos), M.alloy);
     this.group.add(intake);
     this.bovPoint = this.throttleBody.clone();
+    this.bovFrame = this.group; // the object bovPoint is relative to
     this.top = pc.y + plenumH / 2;
 
     if (kind === 'supercharger') this.buildBlower(ctx, pc, len);
@@ -129,6 +131,8 @@ export class Induction {
 
   buildTurbos(ctx) {
     const { B, M, collectors, kind } = ctx;
+    const kit = new THREE.Group();
+    this.kit = kit;
     const count = kind === 'twin-turbo' ? Math.min(2, collectors.length) : 1;
     const turbineGeo = merge([
       new THREE.TorusGeometry(0.3 * B, 0.15 * B, 10, 24),
@@ -178,7 +182,7 @@ export class Induction {
       comp.position.set(t.x, t.y, cz);
       const wheel = new THREE.Mesh(wheelGeo, M.chrome);
       wheel.position.set(t.x, t.y, cz + 0.04 * B);
-      this.group.add(turbine, core, comp, wheel);
+      kit.add(turbine, core, comp, wheel);
       this.metal.push(wheel);
       this.turbos.push({ wheel, angle: i * 0.7 });
       // Feed pipe from the collector into the turbine scroll.
@@ -204,7 +208,7 @@ export class Induction {
       tk.translate(s * (icW / 2 + 0.14 * B), icY, icZ);
       return tk;
     })), M.alloy);
-    this.group.add(core, tanks);
+    kit.add(core, tanks);
 
     const pipes = [];
     outlets.forEach((o, i) => {
@@ -225,8 +229,9 @@ export class Induction {
       icOut, v3(xo, icY + icH * 0.5 + 0.3 * B, icZ + 0.25 * B), v3(xo, tb.y - 0.6 * B, icZ + 0.2 * B),
       v3(xo * 0.45, tb.y, Math.max(icZ, tb.z + 0.6 * B)), v3(tb.x, tb.y, tb.z + 0.3 * B), tb,
     ], 0.13 * B, 72, 10));
-    this.group.add(new THREE.Mesh(merge(pipes), M.charge));
+    kit.add(new THREE.Mesh(merge(pipes), M.charge));
     this.bovPoint = v3(xo * 0.45, tb.y + 0.25 * B, Math.max(icZ, tb.z + 0.6 * B));
+    this.bovFrame = kit;
   }
 
   /** dt seconds; crankDeg for belt-driven parts; turboRpm drives the wheels at visual speed. */

@@ -162,7 +162,8 @@ export const EXPLODE = Object.freeze({
   head: 1.7, // heads, cams and valves, along the bank axis
   sleeve: 0.75, // cylinder liners, along the bank axis
   exhaust: 1.0, // headers: with the head, plus this much outwards
-  intake: 2.4, // plenum, blower or turbos: straight up
+  intake: 2.2, // plenum and runners (and a blower): straight up
+  kit: 1.6, // turbos, intercooler and charge piping: forwards, clear of the block
   sump: 1.5, // down
   front: 1.3, // timing drive: forwards
   bell: 1.2, // clutch housing: backwards
@@ -183,12 +184,15 @@ export function explodeOffset(part, bankDeg, t, B, out) {
     out[0] = ax * d;
     out[1] = ay * d;
   } else if (part === 'exhaust') {
+    // Headers follow their head out, then step away from it: outwards on an
+    // inline or V, straight down under a boxer.
     const h = EXPLODE.head * B * t;
-    out[0] = ax * h + (Math.abs(ax) > 0.05 ? Math.sign(ax) : 1) * d;
-    out[1] = ay * h - (Math.abs(ax) > 0.95 ? d : 0);
+    const flat = Math.abs(ax) > 0.95;
+    out[0] = ax * h + (flat ? 0 : (Math.abs(ax) > 0.05 ? Math.sign(ax) : 1) * d);
+    out[1] = ay * h - (flat ? d : 0);
   } else if (part === 'intake') out[1] = d;
   else if (part === 'sump') out[1] = -d;
-  else if (part === 'front') out[2] = d;
+  else if (part === 'front' || part === 'kit') out[2] = d;
   else out[2] = -d; // bell, clutch, flywheel, gearbox move back
   return out;
 }

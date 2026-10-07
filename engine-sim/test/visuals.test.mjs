@@ -266,6 +266,13 @@ test('exploded view moves heads along the bank axis and the gearbox back', () =>
   assert.ok(out[2] < -1);
   explodeOffset('intake', 30, 0.5, 1, out);
   assert.ok(out[1] > 0 && out[0] === 0);
+  explodeOffset('kit', 0, 1, 1, out);
+  assert.ok(out[2] > 1 && out[0] === 0 && out[1] === 0, 'turbo kit slides forwards, clear of the block');
+  // Boxer headers follow the head sideways and drop; V headers step outwards.
+  explodeOffset('exhaust', 90, 1, 1, out);
+  assert.ok(near(out[0], 1.7) && out[1] < -0.9, `boxer headers drop (${out})`);
+  explodeOffset('exhaust', -45, 1, 1, out);
+  assert.ok(out[0] < -2 && out[1] > 1, `V headers move out with the head (${out})`);
 });
 
 test('timing chain path wraps the sprockets', () => {

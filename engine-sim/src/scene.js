@@ -110,6 +110,8 @@ export class EngineView {
     this.insets = { top: 0, bottom: 0 };
     this.tmp = v3();
     this.tmp2 = v3();
+    this.sphA = new THREE.Sphere();
+    this.sphB = new THREE.Sphere();
     this.m4 = new THREE.Matrix4();
     this.color = new THREE.Color();
     this.off = [0, 0, 0];
@@ -175,6 +177,10 @@ export class EngineView {
     this.floor.position.set(box.getCenter(this.tmp).x, box.min.y - 0.05, box.getCenter(this.tmp).z);
     this.labels.setCount(profile.kind === 'rotary' ? profile.firingOrder : profile.cylinders.map((c) => c.num));
 
+    // Bounds of the fully exploded assembly, so the camera can follow the parts out.
+    this.applyExplode(1);
+    this.sphere0 = box.getBoundingSphere(new THREE.Sphere());
+    this.sphere1 = new THREE.Box3().setFromObject(this.root).getBoundingSphere(new THREE.Sphere());
     this.applyDisplay();
     this.applyExplode(this.explodeT);
     // What glows in the bloom pass.
@@ -454,6 +460,7 @@ export class EngineView {
     this.exhaust.groups.forEach((g) => this.addExplodable(g.group, 'exhaust', g.bankDeg));
     this.inductionHw = ind;
     this.engine.add(this.addExplodable(ind.group, 'intake'));
+    if (ind.kit) this.engine.add(this.addExplodable(ind.kit, 'kit'));
     if (ind.belt) this.engine.add(ind.belt);
     for (const m of ind.metal) this.addMetal(m);
   }
@@ -516,12 +523,21 @@ export class EngineView {
 
   // ── Camera ────────────────────────────────────────────────────────────────
 
+  /** Bounding sphere of the assembly at explode level t (assembled and exploded bounds blended). */
+  sphereAt(t, out) {
+    out.center.lerpVectors(this.sphere0.center, this.sphere1.center, t);
+    out.radius = this.sphere0.radius + (this.sphere1.radius - this.sphere0.radius) * t;
+    return out;
+  }
+
+  /** Where the camera aims for a bounding sphere: the engine block rather than the middle of engine + gearbox. */
+  frameCenter(sphere, out) {
+    return out.set(sphere.center.x, sphere.center.y * 0.6, sphere.center.z * 0.35 + this.geom.front * 0.15);
+  }
+
   frameInfo() {
-    const sphere = this.bounds.getBoundingSphere(new THREE.Sphere());
-    // Aim at the engine block rather than the middle of engine + gearbox.
-    const center = sphere.center.clone();
-    center.z = sphere.center.z * 0.35 + this.geom.front * 0.15;
-    center.y = sphere.center.y * 0.6;
+    const sphere = this.sphereAt(this.explodeT, new THREE.Sphere());
+    const center = this.frameCenter(sphere, v3());
     const vFov = this.camera.fov * DEG;
     const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
     const usable = Math.max(0.35, 1 - (this.insets.top + this.insets.bottom) / Math.max(1, this.height));
@@ -629,10 +645,15 @@ export class EngineView {
       const before = this.explodeT;
       this.explodeT = Math.abs(step) >= Math.abs(d) ? this.explodeTarget : this.explodeT + step;
       this.applyExplode(this.explodeT);
-      // Dolly out as the parts spread so the exploded engine stays in frame.
+      // Follow the parts out: pan with the framing centre and dolly with the
+      // radius, so the exploded engine stays in frame from any camera angle.
       if (!this.rig.flight) {
-        const k = (1 + 0.45 * this.explodeT) / (1 + 0.45 * before);
-        this.tmp.subVectors(this.camera.position, this.controls.target).multiplyScalar(k);
+        const a = this.sphereAt(before, this.sphA);
+        const b = this.sphereAt(this.explodeT, this.sphB);
+        this.frameCenter(b, this.tmp2).sub(this.frameCenter(a, this.tmp));
+        this.controls.target.add(this.tmp2);
+        this.camera.position.add(this.tmp2);
+        this.tmp.subVectors(this.camera.position, this.controls.target).multiplyScalar(b.radius / a.radius);
         this.camera.position.copy(this.controls.target).add(this.tmp);
       }
     }
@@ -1027,7 +1048,7 @@ export class EngineView {
         this.effects.sparkBurst(at, this.tmp2.set(0, 0.15, -1), Math.round(3 + 6 * s), 6 + 6 * s, 0.6, 0.045 * B);
       }
     } else if (kind === 'bov') {
-      const at = this.inductionHw.group.localToWorld(this.tmp.copy(this.inductionHw.bovPoint));
+      const at = this.inductionHw.bovFrame.localToWorld(this.tmp.copy(this.inductionHw.bovPoint));
       this.effects.smokeBurst(at, this.tmp2.set(0.3, 1, 0.5), Math.round(10 + 14 * s), 2.2, 0.45 * B, 0.95, 0.32, 0.8);
     } else if (kind === 'smoke') {
       const at = this.engine.localToWorld(this.tmp.set(0, (this.geom.caseTop ?? 0) + 0.6 * B, 0));
