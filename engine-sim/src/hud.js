@@ -177,6 +177,17 @@ export function garageSpecs(entry) {
   };
 }
 
+/**
+ * The garage build the settings still describe exactly, or null. settings.garage
+ * alone can be stale when something changes the engine without clearing it.
+ */
+export function fittedGarage(settings, entries) {
+  const entry = settings.garage ? entries.find((g) => g.id === settings.garage) : null;
+  if (!entry) return null;
+  for (const [k, v] of Object.entries(entry.settings)) if (settings[k] !== v) return null;
+  return entry;
+}
+
 /** 6,600 style thousands separators without locale lookups. */
 export const groupThousands = (n) => String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 

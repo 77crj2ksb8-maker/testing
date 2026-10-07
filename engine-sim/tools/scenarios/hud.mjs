@@ -281,6 +281,31 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
   expect(await evaluate(() => !document.getElementById('opt-launch-field').hidden), 'launch control reveals the launch-rpm slider');
   await tap('#opt-launch');
   await tap('#opt-induction .chip[data-value="na"]');
+  // A layout picked by hand after a garage build starts from its own defaults
+  // (not the rotary's 1.3 L, idle, turbos and garage tag).
+  await evaluate(() => window.__app.actions.loadGarage('tt-rotary'));
+  await settle();
+  expect(/Twin-turbo 2-rotor/.test(await evaluate(() => document.getElementById('opt-garage-note').textContent)), 'settings name the fitted garage build');
+  await page.locator('#opt-preset .chip').filter({ hasText: /^V8 Flatplane$/ }).click();
+  await page.locator('#opt-cylinders .chip').filter({ hasText: /^V12$/ }).click();
+  const v12 = await evaluate(() => {
+    const a = window.__app;
+    return {
+      cyl: a.profile.cylinders?.length, l: a.profile.displacementL, garage: a.settings.garage, induction: a.settings.induction,
+      idle: a.settings.idleRpm, bore: a.settings.boreStroke, note: document.getElementById('opt-garage-note').textContent,
+    };
+  });
+  expect(v12.cyl === 12 && v12.l > 4 && v12.garage === null && v12.induction === 'na' && v12.idle === 800 && v12.bore === 1 && !/Loaded/.test(v12.note),
+    `V12 picked after the rotary build gets V12 defaults (${JSON.stringify(v12)})`);
+  // Hand-editing a garage build's engine untags it.
+  await evaluate(() => window.__app.actions.loadGarage('smallblock'));
+  await evaluate(() => {
+    const r = document.getElementById('opt-idle');
+    r.value = '750';
+    r.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+  const edited = await evaluate(() => ({ garage: window.__app.settings.garage, idle: window.__app.settings.idleRpm }));
+  expect(edited.garage === null && edited.idle === 750, `editing the idle clears the garage tag (${JSON.stringify(edited)})`);
   // Cylinder chips name boxers and the V-twin properly.
   await evaluate(() => window.__app.apply({ preset: 'boxer', cylinders: 4, displacementL: null, redlineRpm: null }, 'engine'));
   const boxer = await evaluate(() => [...document.querySelectorAll('#opt-cylinders .chip')].map((c) => c.textContent));
@@ -298,6 +323,8 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
   await settle();
   const cards = await evaluate(() => [...document.querySelectorAll('.garage-card')].map((c) => c.textContent));
   expect(cards.length === 12, `garage lists all 12 builds (${cards.length})`);
+  const fittedCards = await evaluate(() => document.querySelectorAll('.garage-card[aria-current="true"]').length);
+  expect(fittedCards === 0, `no build is marked fitted on a hand-built V-twin (${fittedCards})`);
   expect(cards.every((t) => /\d+hp/.test(t.replace(/\s/g, '')) && /Nm/.test(t) && /redline/.test(t)), 'every card shows hp, Nm and redline');
   await shot('hud-garage');
   await page.locator('.garage-card[data-id="flat6-9k"]').click();

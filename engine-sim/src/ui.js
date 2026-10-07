@@ -1,7 +1,7 @@
 // Settings sheet, garage sheet and telemetry panel (stat tiles, torque/power
 // charts, shift log).
 
-import { PRESETS, PRESET_ORDER, GEAR_RATIO_PRESETS, wotTorque, powerHp, firingOrderLabel } from './config.js';
+import { PRESETS, PRESET_ORDER, GEAR_RATIO_PRESETS, DEFAULT_SETTINGS, wotTorque, powerHp, firingOrderLabel } from './config.js';
 import { formatSpeed, speedUnit } from './dom.js';
 import { cylinderLabel, groupThousands } from './hud.js';
 
@@ -51,6 +51,27 @@ export function defaultVvlRpm(profile) {
   const lo = profile.idleRpm + 1000;
   const hi = profile.redlineRpm - 200;
   return clamp(Math.round((profile.redlineRpm * 0.66) / 100) * 100, lo, hi);
+}
+
+/**
+ * Settings patch for picking a layout (preset chip) by hand, or a cylinder
+ * count while a garage build is fitted. The new engine starts from its own
+ * defaults: displacement, redline, bore/stroke, idle and cam switching reset
+ * and the garage build is no longer fitted. Forced induction the user chose
+ * in its own section stays; a garage build's turbo or blower leaves with it.
+ */
+export function layoutPatch(settings, preset, cylinders) {
+  const patch = {
+    preset, cylinders, redlineRpm: null, displacementL: null, vvlRpm: null, garage: null,
+    boreStroke: DEFAULT_SETTINGS.boreStroke, idleRpm: DEFAULT_SETTINGS.idleRpm,
+  };
+  if (settings.garage) Object.assign(patch, { induction: DEFAULT_SETTINGS.induction, boostBar: DEFAULT_SETTINGS.boostBar });
+  return patch;
+}
+
+/** Settings patch for a cylinder chip: a hand-built engine keeps its tuning, a garage build starts over. */
+export function cylinderPatch(settings, cylinders) {
+  return settings.garage ? layoutPatch(settings, settings.preset, cylinders) : { cylinders, redlineRpm: null, displacementL: null, garage: null };
 }
 
 /** Displacement slider range (litres) for a layout: the per-cylinder limits the profile builder accepts. */
@@ -206,6 +227,8 @@ export class SettingsPanel {
   }
 
   emit(patch, kind) {
+    // Any hand edit to the engine means it is no longer the garage build as listed.
+    if (kind === 'engine' && !('garage' in patch)) patch = { ...patch, garage: null };
     this.onChange(patch, kind);
   }
 
@@ -231,18 +254,19 @@ export class SettingsPanel {
     const units = settings.units;
 
     // Garage shortcut.
-    $('opt-garage-note').textContent = this.garageName?.(settings.garage) ? `Loaded: ${this.garageName(settings.garage)}` : 'Ready-made engine builds';
+    const fitted = this.garageName?.(settings) ?? '';
+    $('opt-garage-note').textContent = fitted ? `Loaded: ${fitted}` : 'Ready-made engine builds';
 
     // Engine.
     chips($('opt-preset'), PRESET_ORDER.map((id) => ({ value: id, label: PRESETS[id].label })), settings.preset, (id) => {
-      this.emit({ preset: id, cylinders: PRESETS[id].count, redlineRpm: null, displacementL: null, garage: null }, 'engine');
+      this.emit(layoutPatch(this.settings, id, PRESETS[id].count), 'engine');
     });
     $('opt-preset-note').textContent = `${profile.name} · ${profile.layoutNote} · firing ${firingOrderLabel(profile)}`;
 
     const def = PRESETS[settings.preset] ?? PRESETS['v8-cross'];
     const count = profile.kind === 'rotary' ? profile.rotors : profile.cylinders.length;
     chips($('opt-cylinders'), def.counts.map((n) => ({ value: n, label: cylinderLabel(def.family, n) })), count,
-      (n) => this.emit({ cylinders: n, redlineRpm: null, displacementL: null, garage: null }, 'engine'));
+      (n) => this.emit(cylinderPatch(this.settings, n), 'engine'));
 
     const { idle, redline, bore, displacement, vvlRpm, boost, launchRpm } = this.inputs;
     const dr = displacementRange(profile);
@@ -565,6 +589,15 @@ export class TelemetryPanel {
     }
     this.lastListKey = '';
     this.units = 'kmh';
+    this.shown = Object.create(null);
+  }
+
+  /** Write a readout only when its text changes, so an open panel does not touch the DOM every frame. */
+  put(id, value) {
+    const text = String(value);
+    if (this.shown[id] === text) return;
+    this.shown[id] = text;
+    $(id).textContent = text;
   }
 
   /** Speed and distance units for the tiles: 'kmh' | 'mph'. */
@@ -643,18 +676,18 @@ export class TelemetryPanel {
     const powerNow = powerHp(torqueNow, rpm);
     this.torque.draw(rpm, torqueNow);
     this.power.draw(rpm, powerNow);
-    $('t-torque-now').textContent = Math.round(torqueNow);
-    $('t-power-now').textContent = Math.round(powerNow);
-    $('t-peak-rpm').textContent = Math.round(stats.peakRpm).toLocaleString('en-US');
-    $('t-top-speed').textContent = formatSpeed(stats.topSpeedKmh, this.units);
-    $('t-zero-100').textContent = stats.bestZeroToHundred ? stats.bestZeroToHundred.toFixed(2) : '—';
-    $('t-distance').textContent = ((stats.distanceM / 1000) * (this.units === 'mph' ? KM_TO_MI : 1)).toFixed(2);
+    this.put('t-torque-now', Math.round(torqueNow));
+    this.put('t-power-now', Math.round(powerNow));
+    this.put('t-peak-rpm', groupThousands(stats.peakRpm));
+    this.put('t-top-speed', formatSpeed(stats.topSpeedKmh, this.units));
+    this.put('t-zero-100', stats.bestZeroToHundred ? stats.bestZeroToHundred.toFixed(2) : '—');
+    this.put('t-distance', ((stats.distanceM / 1000) * (this.units === 'mph' ? KM_TO_MI : 1)).toFixed(2));
 
     const avg = tracker.averageScore;
-    $('t-shift-avg').textContent = avg === null ? '—' : String(avg);
-    $('t-shift-count').textContent = tracker.shiftRecords.length;
-    $('t-grinds').textContent = tracker.grinds;
-    $('t-stalls').textContent = tracker.stalls;
+    this.put('t-shift-avg', avg === null ? '—' : avg);
+    this.put('t-shift-count', tracker.shiftRecords.length);
+    this.put('t-grinds', tracker.grinds);
+    this.put('t-stalls', tracker.stalls);
 
     const key = `${tracker.records.length}:${tracker.records[0]?.time ?? ''}`;
     if (key !== this.lastListKey) {

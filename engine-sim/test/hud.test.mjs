@@ -4,13 +4,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { buildProfile, DEFAULT_SETTINGS, peakFigures } from '../src/config.js';
-import { GARAGE } from '../src/presets.js';
+import { GARAGE, garagePatch } from '../src/presets.js';
 import {
   SHIFT_LEDS, SHIFT_FLASH, shiftPointRpm, shiftLightLevel, tempLevel, healthLevel, formatBoost, stallCopy,
   DIAL_START, DIAL_SWEEP, dialMaxRpm, dialAngle, scrubPeriod, firingAngles, stepFiring, lastFired,
   DISPLAY_MODES, displayModeOf, nextDisplayMode, cylinderLabel, layoutLabel, garageSpecs, groupThousands, paddleReadout,
+  fittedGarage,
 } from '../src/hud.js';
-import { defaultVvlRpm, displacementRange } from '../src/ui.js';
+import { defaultVvlRpm, displacementRange, layoutPatch, cylinderPatch } from '../src/ui.js';
 
 const profile = (patch = {}) => buildProfile({ ...DEFAULT_SETTINGS, ...patch });
 
@@ -194,4 +195,49 @@ test('settings ranges: displacement per layout and the default cam switch point'
     // The profile builder accepts it unchanged.
     assert.equal(buildProfile({ ...DEFAULT_SETTINGS, preset: p.id.startsWith('inline') ? 'i4' : 'v8-cross', cylinders: p.cylinders.length, redlineRpm: p.redlineRpm, vvlRpm: v }).vvlRpm, v);
   }
+});
+
+test('picking a layout after a garage build starts from that layout\'s defaults', () => {
+  // Load the twin-turbo rotary, then pick the V8 Flatplane chip and its V12 count by hand.
+  const fromGarage = { ...DEFAULT_SETTINGS, ...garagePatch('tt-rotary') };
+  const v8 = { ...fromGarage, ...layoutPatch(fromGarage, 'v8-flat', 8) };
+  const v12 = { ...v8, ...cylinderPatch(v8, 12) };
+  const fresh = buildProfile({ ...DEFAULT_SETTINGS, preset: 'v8-flat', cylinders: 12 });
+  const p = buildProfile(v12);
+  assert.equal(p.cylinders.length, 12);
+  assert.equal(p.displacementL, fresh.displacementL, 'not the rotary\'s 1.3 L');
+  for (const k of ['displacementL', 'redlineRpm', 'vvlRpm', 'garage']) assert.equal(v12[k], null, k);
+  assert.equal(v12.boreStroke, DEFAULT_SETTINGS.boreStroke);
+  assert.equal(v12.idleRpm, DEFAULT_SETTINGS.idleRpm);
+  assert.equal(p.redlineRpm, fresh.redlineRpm);
+  assert.equal(p.idleRpm, fresh.idleRpm);
+  assert.equal(p.vvlRpm, null);
+  // The build's twin-turbo kit leaves with the build.
+  assert.equal(v8.induction, 'na');
+  assert.equal(v8.boostBar, DEFAULT_SETTINGS.boostBar);
+  assert.equal(fittedGarage(v12, GARAGE), null);
+
+  // A hand-chosen turbo is the user's own choice and survives a layout change;
+  // a cylinder count change on a hand-built engine keeps its tuning.
+  const own = { ...DEFAULT_SETTINGS, induction: 'turbo', boostBar: 1.2, boreStroke: 1.2, idleRpm: 950, vvlRpm: 6000 };
+  const i4 = { ...own, ...layoutPatch(own, 'i4', 4) };
+  assert.equal(i4.induction, 'turbo');
+  assert.equal(i4.boostBar, 1.2);
+  assert.equal(i4.boreStroke, DEFAULT_SETTINGS.boreStroke);
+  assert.equal(i4.vvlRpm, null);
+  const i5 = { ...i4, boreStroke: 1.3, ...cylinderPatch({ ...i4, boreStroke: 1.3 }, 5) };
+  assert.equal(i5.cylinders, 5);
+  assert.equal(i5.boreStroke, 1.3);
+  assert.equal(i5.displacementL, null);
+});
+
+test('a garage build counts as fitted only while the settings still match it', () => {
+  const s = { ...DEFAULT_SETTINGS, ...garagePatch('vvl-i4') };
+  assert.equal(fittedGarage(s, GARAGE)?.id, 'vvl-i4');
+  assert.equal(fittedGarage({ ...s, boostBar: 1.1, induction: 'turbo' }, GARAGE), null, 'a hand-fitted turbo');
+  assert.equal(fittedGarage({ ...s, preset: 'vtwin', cylinders: 2 }, GARAGE), null, 'a different layout with a stale id');
+  assert.equal(fittedGarage({ ...s, garage: 'nope' }, GARAGE), null);
+  assert.equal(fittedGarage(DEFAULT_SETTINGS, GARAGE), null);
+  // Non-engine settings do not matter.
+  assert.equal(fittedGarage({ ...s, units: 'mph', mode: 'sequential' }, GARAGE)?.id, 'vvl-i4');
 });
