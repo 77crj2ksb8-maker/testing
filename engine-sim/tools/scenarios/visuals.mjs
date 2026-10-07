@@ -216,6 +216,40 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   await snapTo('hero');
   await shot('vis-boxer-hero');
 
+  // ── Synthetic 45° V-twin: two rods on one pin, uneven firing ─────────────────
+  const vtwin = await evaluate(async () => {
+    const { buildProfile } = await import('/src/config.js');
+    const app = window.__app;
+    const base = buildProfile({ ...app.settings, preset: 'i4', cylinders: 4 });
+    const cylinders = [
+      { num: 1, bank: 0, bankDeg: 22.5, throwIndex: 0, slot: 0, fireDeg: 0, pinDeg: 22.5 },
+      { num: 2, bank: 1, bankDeg: -22.5, throwIndex: 0, slot: 1, fireDeg: 315, pinDeg: 22.5 },
+    ];
+    const profile = { ...base, id: 'vtwin-test', banks: 2, vAngle: 45, firingOrder: [1, 2], cylinders, boreMm: 100, strokeMm: 110 };
+    delete profile.layout;
+    app.view.setProfile(profile, app.drive, { ...app.settings, induction: 'na' });
+    const v = app.view;
+    v.rig.active = 'hero';
+    const p = v.presetPose('hero');
+    v.rig.flyTo(p.target, p.position, true);
+    return { layout: v.layout, banks: v.banks.length, pistons: v.pistons.count };
+  });
+  expect(vtwin.layout === 'vtwin' && vtwin.banks === 2 && vtwin.pistons === 2, `synthetic V-twin renders (${vtwin.layout})`);
+  await advance(0.3, { gas: 0.3 });
+  await shot('vis-vtwin');
+
+  // Real layouts from the powertrain track, when its presets are present.
+  const extra = await evaluate(async () => {
+    const { PRESET_ORDER } = await import('/src/config.js');
+    return PRESET_ORDER.filter((id) => id === 'boxer' || id === 'vtwin');
+  });
+  for (const preset of extra) {
+    await apply({ preset, cylinders: preset === 'boxer' ? 6 : 2, induction: 'na' }, 'all');
+    const lay = await evaluate(() => window.__app.view.layout);
+    expect(lay === preset, `${preset} preset renders as ${preset} (got ${lay})`);
+    await shot(`vis-preset-${preset}`);
+  }
+
   // ── Event wiring: bus → view ────────────────────────────────────────────────
   await apply({ preset: 'v8-cross', cylinders: 8, induction: 'na' }, 'all');
   const wiring = await evaluate(() => {
