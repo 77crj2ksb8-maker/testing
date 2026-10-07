@@ -706,7 +706,7 @@ export default {
           el('div', { class: 'mo-drag-nums' }, et.node, speed.node, dist.node),
           track,
           el('ol', { class: 'mo-splits', 'aria-label': 'Splits' }, splitNodes.map((s) => s.li))));
-      return { root, bulbs, msg, et, speed, dist, fill, splitNodes };
+      return { root, bulbs, msg, et, speed, dist, fill, splitNodes, marksShown: -1 };
     }
 
     function buildSlipUi() {
@@ -821,7 +821,7 @@ export default {
         const li = el('li', {},
           el('span', { class: 'mo-ach-ico', html: ICONS.trophy, 'aria-hidden': 'true' }),
           el('div', {}, el('b', { text: a.title }), detail));
-        return { id: a.id, li, detail, base: a.detail };
+        return { id: a.id, li, detail, base: a.detail, title: a.title };
       });
       const root = el('section', { class: 'mo-section', 'aria-label': 'Achievements' },
         el('div', { class: 'chart-head' }, el('h3', { text: 'Achievements' }), count),
@@ -947,11 +947,15 @@ export default {
         dragUi.fillWidth = w;
         dragUi.fill.style.width = w;
       }
-      for (let i = 0; i < race.splits.length; i++) {
-        const t = race.splits[i].t;
-        const n = dragUi.splitNodes[i];
-        setText(n.val, t === null ? '—' : t.toFixed(2));
-        setClass(n.li, 'is-hit', t !== null);
+      // Splits change only when the car passes a mark (or the strip re-arms).
+      if (race.nextMark !== dragUi.marksShown) {
+        dragUi.marksShown = race.nextMark;
+        for (let i = 0; i < race.splits.length; i++) {
+          const t = race.splits[i].t;
+          const n = dragUi.splitNodes[i];
+          setText(n.val, t === null ? '—' : t.toFixed(2));
+          setClass(n.li, 'is-hit', t !== null);
+        }
       }
     }
 
@@ -1479,16 +1483,19 @@ export default {
       for (const item of achUi.items) {
         const on = achievements.has(item.id);
         setClass(item.li, 'is-on', on);
-        item.li.setAttribute('aria-label', `${on ? 'Unlocked' : 'Locked'}: ${item.base}`);
         // Speeds in the user's units; the collector shows what is still missing.
+        let detail = item.base;
         const kmh = SPEED_ACHIEVEMENTS[item.id];
         if (kmh) {
           const mph = Math.round(kmh * KMH_TO_MPH);
-          setText(item.detail, app.settings.units === 'mph' ? `Reach ${mph} mph (${kmh} km/h).` : `Reach ${kmh} km/h (${mph} mph).`);
+          detail = app.settings.units === 'mph' ? `Reach ${mph} mph (${kmh} km/h).` : `Reach ${kmh} km/h (${mph} mph).`;
         } else if (item.id === 'all-layouts') {
           const missing = achievements.missingLayouts();
-          setText(item.detail, on || missing.length === 5 ? item.base : `${item.base} Still to drive: ${missing.join(', ')}.`);
+          if (!on && missing.length < 5) detail = `${item.base} Still to drive: ${missing.join(', ')}.`;
         }
+        setText(item.detail, detail);
+        // The label replaces the item's text for screen readers, so it carries the title too.
+        item.li.setAttribute('aria-label', `${on ? 'Unlocked' : 'Locked'}: ${item.title}. ${detail}`);
       }
     }
 
