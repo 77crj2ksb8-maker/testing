@@ -7,7 +7,7 @@ import { el, injectStyles } from '../dom.js';
 import { STROKES } from './timing.js';
 
 const CSS = `
-.stroke-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 1; }
+.stroke-labels { position: absolute; inset: 0; pointer-events: none; overflow: hidden; z-index: 0; }
 .stroke-chip {
   position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 4px;
   padding: 2px 7px 2px 5px; border-radius: 999px; white-space: nowrap;
