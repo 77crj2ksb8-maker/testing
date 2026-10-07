@@ -76,8 +76,8 @@ export const strokeProgress = (deg) => (wrap(deg, 720) % 180) / 180;
 // Gas colour keyframes: [deg, r, g, b, alpha, glow]. Burning cycle, then a
 // motoring cycle (no combustion: the compressed charge just expands again).
 const GAS_BURN = [
-  0, 1.0, 0.9, 0.62, 0.62, 1.0,
-  25, 1.0, 0.62, 0.22, 0.6, 0.9,
+  0, 1.0, 0.78, 0.42, 0.62, 1.0,
+  25, 1.0, 0.55, 0.16, 0.6, 0.9,
   90, 1.0, 0.36, 0.08, 0.52, 0.55,
   170, 0.6, 0.15, 0.06, 0.45, 0.2,
   205, 0.44, 0.42, 0.44, 0.46, 0.04,

@@ -78,7 +78,7 @@ test('stroke index and progress walk power → exhaust → intake → compressio
 test('gas colours: flame on power, blue intake, thinner charge at closed throttle', () => {
   const out = [0, 0, 0, 0, 0];
   gasColor(10, 1, true, out);
-  assert.ok(out[0] > 0.9 && out[4] > 0.8, 'power stroke glows');
+  assert.ok(out[0] > 0.9 && out[4] > 0.8 && out[0] > out[2], 'power stroke glows orange');
   gasColor(10, 1, false, out);
   assert.ok(out[4] < 0.1, 'no flame without combustion');
   gasColor(450, 1, true, out);
