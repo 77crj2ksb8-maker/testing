@@ -33,6 +33,7 @@ const SEQ_OPEN = 0.08;
 const SEQ_CLOSE = 0.14;
 const BLIP_MAX = 0.35; // longest a sequential downshift waits for the blip
 const MANUAL_BLIP_MAX = 1.5; // H-pattern blip assist gives up after this long
+const BLIP_LEAD = 0.12; // s of rev rise the blip anticipates (throttle-body lag)
 
 // Order of the sequential selector drum.
 const seqIndex = (g) => (g === 'R' ? -1 : g === 'N' ? 0 : g);
@@ -47,6 +48,7 @@ export class Gearbox {
     this.shift = null;
     this.queued = 0; // sequential: one more shift requested mid-shift (+1 up, −1 down)
     this.blip = null; // manual auto-blip assist: { t }
+    this.blipRpm = null; // rpm on the previous blip tick (rev-rate estimate)
     this.sinceShift = 10;
     this.launching = true;
     this.autoPedal = 1;
@@ -98,6 +100,7 @@ export class Gearbox {
     this.tracker?.engage(gear, sim, { clutchless: !clutchOpen });
     // Auto-blip: the gear needs more revs than the engine has, so blip to match.
     this.blip = this.assists.autoBlip && typeof gear === 'number' && sim.running && targetRpm > sim.rpm + 250 ? { t: 0 } : null;
+    this.blipRpm = null;
     return { ok: true, clutchless: !clutchOpen, mismatchRpm };
   }
 
@@ -200,6 +203,7 @@ export class Gearbox {
       if (typeof gear === 'number' && moving) {
         // Selecting a gear while rolling in neutral: rev-match as on a downshift.
         this.shift = { from, to: gear, down: true, flat: false, phase: 'close', t: 0, source: 'sequential' };
+        this.blipRpm = null;
         this.tracker?.engage(gear, sim, { auto: true });
       } else if (typeof gear === 'number') {
         this.tracker?.engage(gear, sim, { auto: true });
@@ -208,10 +212,10 @@ export class Gearbox {
       return { ok: true, gear: sim.gear };
     }
     const down = seqIndex(gear) < seqIndex(from);
-    // Flat shift: upshift with the throttle pinned; the ignition cut unloads the dogs.
-    const flat = !down && sim.throttleInput > 0.5 && sim.running;
     this.tracker?.leaveGear(from, sim.time);
-    this.shift = { from, to: gear, down, flat, phase: flat ? 'cut' : 'open', t: 0, source: 'sequential' };
+    // 'start' decides on the next tick, from the pedal actually held, whether this is a flat shift.
+    this.shift = { from, to: gear, down, flat: false, phase: down ? 'open' : 'start', t: 0, source: 'sequential' };
+    this.blipRpm = null;
     this.sinceShift = 0;
     return { ok: true, gear: from, pending: gear };
   }
@@ -252,8 +256,19 @@ export class Gearbox {
       this.blip = null;
       return gas;
     }
-    const target = this.rpmIn(sim.gear);
-    return Math.max(gas, clamp((target - sim.rpm) / 500, 0, 1));
+    return Math.max(gas, this.blipThrottle(this.rpmIn(sim.gear), dt));
+  }
+
+  /**
+   * Throttle that brings the engine to targetRpm without overshooting: aims at
+   * where the revs will be once the throttle-body lag has played out.
+   */
+  blipThrottle(targetRpm, dt) {
+    const rpm = this.sim.rpm;
+    const rate = this.blipRpm === null || dt <= 0 ? 0 : (rpm - this.blipRpm) / dt;
+    this.blipRpm = rpm;
+    const predicted = rpm + Math.max(0, rate) * BLIP_LEAD;
+    return clamp((targetRpm - predicted) / 400, 0, 1);
   }
 
   upshiftPoint(gas) {
@@ -268,6 +283,11 @@ export class Gearbox {
     const s = this.shift;
     s.t += dt;
     let throttle = gas;
+    if (s.phase === 'start') {
+      // Flat shift: upshift with the throttle pinned; the ignition cut unloads the dogs.
+      s.flat = gas > 0.5 && sim.running;
+      s.phase = s.flat ? 'cut' : 'open';
+    }
     if (s.phase === 'cut') {
       // Flat shift: clutch stays clamped, ignition cut unloads the gear.
       sim.torqueCut = true;
@@ -282,17 +302,14 @@ export class Gearbox {
       // Rev-match a downshift with a throttle blip; cut torque on an upshift.
       sim.torqueCut = !s.down;
       const target = this.rpmIn(s.to);
-      if (s.down) throttle = sim.rpm < target ? 1 : 0;
+      if (s.down) throttle = s.source === 'auto' ? (sim.rpm < target ? 1 : 0) : this.blipThrottle(target, dt);
       const minOpen = s.source === 'auto' ? AUTO_OPEN : SEQ_OPEN;
       const matched = !s.down || s.source === 'auto' || sim.rpm >= target - 150 || s.t >= BLIP_MAX;
       if (s.t >= minOpen && matched) this.swapGear(s, 'close');
     } else {
       sim.torqueCut = false;
       const close = s.source === 'auto' ? AUTO_CLOSE : SEQ_CLOSE;
-      if (s.down && s.source === 'sequential') {
-        const target = this.rpmIn(s.to);
-        throttle = Math.max(gas, clamp((target - sim.rpm) / 400, 0, 1));
-      }
+      if (s.down && s.source === 'sequential') throttle = Math.max(gas, this.blipThrottle(this.rpmIn(s.to), dt));
       this.autoPedal = pedalForEngagement(smooth(s.t / close));
       if (s.t >= close) this.endShift();
     }
