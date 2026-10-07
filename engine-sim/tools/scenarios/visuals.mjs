@@ -162,7 +162,6 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
     return { rotors: ind.spinners.length, belt: !!ind.belt };
   });
   expect(sc.rotors >= 3 && sc.belt, 'supercharger has rotors, a pulley and a belt');
-  await shot('vis-supercharger');
 
   // ── Draw-call budget: V12, everything on ─────────────────────────────────────
   await apply({ preset: 'v8-cross', cylinders: 12, induction: 'twin-turbo', strokeGases: true, valvetrain: true }, 'all');
@@ -183,72 +182,103 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   await apply({ xray: false, cutaway: false }, 'view');
   await evaluate(() => window.__app.actions.repair());
 
-  // ── Rotary ──────────────────────────────────────────────────────────────────
-  await apply({ preset: 'rotary', cylinders: 2, induction: 'turbo' }, 'all');
-  await advance(1, { gas: 0.5 });
-  const rot = await evaluate(() => ({ layout: window.__app.view.layout, ports: window.__app.view.portMarks?.count }));
-  expect(rot.layout === 'rotary' && rot.ports === 4, `rotary shows ports instead of valves (${rot.ports})`);
+  // ── Garage builds: real layouts and induction kits ──────────────────────────
+  const garage = async (id) => {
+    const ok = await evaluate((g) => window.__app.actions.loadGarage?.(g) ?? false, id);
+    expect(ok, `garage build ${id} loads`);
+    await advance(0.8, {});
+    await advance(0.5, { gas: 0.5 });
+    await frames(2); // pose the new model
+  };
+
+  // Turbo straight-six: one turbo on the exhaust side, wheel spinning from sim.turboRpm.
+  await garage('turbo-i6');
+  await advance(1.2, { gas: 1 });
+  const i6 = await evaluate(() => {
+    const v = window.__app.view;
+    return { layout: v.layout, turbos: v.inductionHw.turbos.length, turboRpm: window.__app.sim.turboRpm, banks: v.banks.length };
+  });
+  expect(i6.layout === 'inline' && i6.banks === 1 && i6.turbos === 1, `turbo inline-6: one bank, one turbo (${i6.layout}, ${i6.turbos})`);
+  expect(i6.turboRpm > 20000, `turbo shaft spools up under load (${Math.round(i6.turboRpm)} rpm)`);
+  await shot('vis-turbo-i6');
+
+  // Supercharged V8: blower rotors and pulley turn with the crank.
+  await garage('supercharged-v8');
+  await evaluate(() => { window.__rotor = window.__app.view.inductionHw.spinners[0].obj.rotation.z; });
+  await frames(2);
+  const blower = await evaluate(() => {
+    const ind = window.__app.view.inductionHw;
+    return { kind: ind.kind, belt: !!ind.belt?.visible, moved: Math.abs(ind.spinners[0].obj.rotation.z - window.__rotor) };
+  });
+  expect(blower.kind === 'supercharger' && blower.belt && blower.moved > 0, `supercharger rotors turn on a visible belt (Δ${blower.moved.toFixed(3)})`);
+  await shot('vis-supercharger');
+
+  // Twin-turbo rotary: ports instead of valves, two turbos that do not collide.
+  await garage('tt-rotary');
+  const rot = await evaluate(() => {
+    const v = window.__app.view;
+    const t = v.inductionHw.turbos.map((k) => k.wheel.position);
+    return {
+      layout: v.layout, ports: v.portMarks?.count, turbos: t.length, valves: !!v.valvetrain,
+      gap: t.length === 2 ? Math.abs(t[0].z - t[1].z) / v.geom.B : 0,
+    };
+  });
+  expect(rot.layout === 'rotary' && rot.ports === 4 && !rot.valves, `rotary shows ports instead of valves (${rot.ports})`);
+  expect(rot.turbos === 2 && rot.gap >= 1.45, `twin turbos sit apart (${rot.gap.toFixed(2)} bores)`);
   await shot('vis-rotary');
 
-  // ── Synthetic boxer (no profile.layout: derived from bankDeg ±90) ───────────
-  const boxer = await evaluate(async () => {
-    const { buildProfile } = await import('/src/config.js');
-    const app = window.__app;
-    const base = buildProfile({ ...app.settings, preset: 'i4', cylinders: 4 });
-    const order = [1, 3, 2, 4];
-    const cylinders = [1, 2, 3, 4].map((num) => {
-      const bank = num % 2 ? 0 : 1;
-      const bankDeg = bank ? -90 : 90;
-      const fireDeg = order.indexOf(num) * 180;
-      return { num, bank, bankDeg, throwIndex: num - 1, slot: 0, fireDeg, pinDeg: (((bankDeg - fireDeg) % 360) + 360) % 360 };
-    });
-    const profile = { ...base, id: 'boxer-test', name: 'Boxer test', banks: 2, vAngle: 180, firingOrder: order, cylinders };
-    delete profile.layout;
-    app.view.setProfile(profile, app.drive, { ...app.settings, induction: 'turbo' });
-    const v = app.view;
-    v.rig.active = 'front';
-    const p = v.presetPose('front');
-    v.rig.flyTo(p.target, p.position, true);
-    return { layout: v.layout, banks: v.banks.length, valves: v.valvetrain.objects.length };
+  // Turbo boxer-4: flat, opposed pistons, a head on each side.
+  await garage('rally-boxer');
+  const flat = await evaluate(() => {
+    const v = window.__app.view;
+    const m = new v.m4.constructor();
+    const xs = [];
+    for (let i = 0; i < v.pistons.count; i++) {
+      v.pistons.getMatrixAt(i, m);
+      xs.push(m.elements[12]);
+    }
+    const heads = v.banks.map((b) => b.headGroup.localToWorld(new v.tmp.constructor(0, v.geom.H.camY, b.zc)));
+    return {
+      layout: v.layout, banks: v.banks.length, pistons: xs.length,
+      left: xs.filter((x) => x < -0.3).length, right: xs.filter((x) => x > 0.3).length,
+      heads: heads.map((h) => Math.sign(Math.round(h.x * 100))), headY: Math.max(...heads.map((h) => Math.abs(h.y))),
+      span: Math.abs(heads[0].x - heads[1].x), deck: v.geom.deck,
+    };
   });
-  expect(boxer.layout === 'boxer' && boxer.banks === 2, `synthetic boxer is laid out flat (${boxer.layout}, ${boxer.banks} banks)`);
+  expect(flat.layout === 'boxer' && flat.banks === 2, `boxer-4 is laid out flat (${flat.layout})`);
+  expect(flat.left === 2 && flat.right === 2, `opposed pistons, two each side (${flat.left}/${flat.right})`);
+  expect(flat.heads.includes(1) && flat.heads.includes(-1) && flat.headY < flat.span * 0.2, 'a cylinder head on each side, level with the crank');
+  await snapTo('front');
   await shot('vis-boxer');
   await snapTo('hero');
   await shot('vis-boxer-hero');
 
-  // ── Synthetic 45° V-twin: two rods on one pin, uneven firing ─────────────────
-  const vtwin = await evaluate(async () => {
-    const { buildProfile } = await import('/src/config.js');
-    const app = window.__app;
-    const base = buildProfile({ ...app.settings, preset: 'i4', cylinders: 4 });
-    const cylinders = [
-      { num: 1, bank: 0, bankDeg: 22.5, throwIndex: 0, slot: 0, fireDeg: 0, pinDeg: 22.5 },
-      { num: 2, bank: 1, bankDeg: -22.5, throwIndex: 0, slot: 1, fireDeg: 315, pinDeg: 22.5 },
-    ];
-    const profile = { ...base, id: 'vtwin-test', banks: 2, vAngle: 45, firingOrder: [1, 2], cylinders, boreMm: 100, strokeMm: 110 };
-    delete profile.layout;
-    app.view.setProfile(profile, app.drive, { ...app.settings, induction: 'na' });
-    const v = app.view;
-    v.rig.active = 'hero';
-    const p = v.presetPose('hero');
-    v.rig.flyTo(p.target, p.position, true);
-    return { layout: v.layout, banks: v.banks.length, pistons: v.pistons.count };
-  });
-  expect(vtwin.layout === 'vtwin' && vtwin.banks === 2 && vtwin.pistons === 2, `synthetic V-twin renders (${vtwin.layout})`);
-  await advance(0.3, { gas: 0.3 });
-  await shot('vis-vtwin');
+  // Flat-6.
+  await garage('flat6-9k');
+  const six = await evaluate(() => ({ layout: window.__app.view.layout, pistons: window.__app.view.pistons.count }));
+  expect(six.layout === 'boxer' && six.pistons === 6, `flat-6 renders flat with six pistons (${six.layout}, ${six.pistons})`);
+  await shot('vis-flat6');
 
-  // Real layouts from the powertrain track, when its presets are present.
-  const extra = await evaluate(async () => {
-    const { PRESET_ORDER } = await import('/src/config.js');
-    return PRESET_ORDER.filter((id) => id === 'boxer' || id === 'vtwin');
+  // 45° V-twin: both rods on one crank pin.
+  await garage('vtwin-cruiser');
+  const twinPin = await evaluate(() => {
+    const v = window.__app.view;
+    const a = new v.m4.constructor();
+    const b = new v.m4.constructor();
+    v.rods.getMatrixAt(0, a);
+    v.rods.getMatrixAt(1, b);
+    return {
+      layout: v.layout, pistons: v.pistons.count,
+      d: Math.hypot(a.elements[12] - b.elements[12], a.elements[13] - b.elements[13]),
+      dz: Math.abs(a.elements[14] - b.elements[14]) / v.geom.B,
+    };
   });
-  for (const preset of extra) {
-    await apply({ preset, cylinders: preset === 'boxer' ? 6 : 2, induction: 'na' }, 'all');
-    const lay = await evaluate(() => window.__app.view.layout);
-    expect(lay === preset, `${preset} preset renders as ${preset} (got ${lay})`);
-    await shot(`vis-preset-${preset}`);
-  }
+  expect(twinPin.layout === 'vtwin' && twinPin.pistons === 2, `V-twin renders (${twinPin.layout})`);
+  expect(twinPin.d < 1e-6 && twinPin.dz > 0.1 && twinPin.dz < 0.5, `V-twin rods share one pin, side by side (Δ${twinPin.d.toExponential(1)}, ${twinPin.dz.toFixed(2)} bores apart)`);
+  await snapTo('front');
+  await shot('vis-vtwin');
+  await snapTo('hero');
+
 
   // ── Event wiring: bus → view ────────────────────────────────────────────────
   await apply({ preset: 'v8-cross', cylinders: 8, induction: 'na' }, 'all');
