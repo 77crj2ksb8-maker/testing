@@ -29,8 +29,8 @@ export default {
     bus.on('blown', (e) => {
       blownProfileId = app.profile.id;
       const why = e.cause === 'overheat'
-        ? `Cooked at ${Math.round(sim.coolantC)} °C coolant`
-        : `Over-revved to ${fmtRpm(Math.max(peakRpm, sim.rpm))} rpm`;
+        ? `Blown: coolant hit ${Math.round(sim.coolantC)} °C`
+        : `Blown at ${fmtRpm(Math.max(peakRpm, sim.rpm))} rpm`;
       app.toast(why, 'bad', 3600);
       navigator.vibrate?.([80, 40, 160]);
     });

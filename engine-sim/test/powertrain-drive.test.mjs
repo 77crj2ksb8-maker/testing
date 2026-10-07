@@ -180,6 +180,21 @@ test('sequential: N sits between 1 and R, and R only goes in at a standstill', (
   assert.ok(top.of('shift').every((e) => e.source === 'sequential'));
 });
 
+test('sequential: shifting at walking pace never stalls', () => {
+  for (const gas of [0, 0.4, 1]) {
+    const r = seq();
+    r.box.shiftUp();
+    r.run(0.3, { gas: 0.4 });
+    for (let i = 0; i < 300 && r.sim.speedKmh < 3; i++) r.run(DT, { gas: 0.4 });
+    r.box.shiftUp();
+    r.run(0.1, { gas });
+    r.box.shiftUp();
+    r.run(1.5, { gas });
+    assert.equal(r.sim.gear, 3);
+    assert.ok(!stalled(r) && r.sim.running, `gas ${gas}`);
+  }
+});
+
 test('sequential: stopping in gear opens the clutch instead of stalling', () => {
   const r = seq();
   r.box.shiftUp();

@@ -314,6 +314,8 @@ export class Gearbox {
       this.autoPedal = pedalForEngagement(smooth(s.t / close));
       if (s.t >= close) this.endShift();
     }
+    // Anti-stall: a shift at walking pace must not drag the engine below idle.
+    if (s.phase !== 'open' && (!sim.running || sim.rpm < sim.profile.idleRpm * 0.85)) this.autoPedal = 1;
     return throttle;
   }
 

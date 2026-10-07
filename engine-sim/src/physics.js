@@ -65,6 +65,7 @@ export class Drivetrain {
     this.drive = drive;
     this.induction = new Induction(profile.induction);
     this.thermal = new Thermal();
+    this.thermalIn = { running: false, powerFrac: 0, load: 0, rpm: 0, redlineRpm: 1, kmh: 0, boostBar: 0, fuelCut: false };
     this.ratedW = ratedPowerW(profile);
     this.reset();
   }
@@ -476,16 +477,16 @@ export class Drivetrain {
 
     // Temperatures, over-rev and failure.
     const th = this.thermal;
-    const flags = th.update(h, {
-      running: this.running,
-      powerFrac: (combustion * this.omega) / this.ratedW,
-      load: combustion / p.peakTorqueNm,
-      rpm: now,
-      redlineRpm: p.redlineRpm,
-      kmh,
-      boostBar: this.boostBar,
-      fuelCut: this.fuelCut,
-    });
+    const ti = this.thermalIn; // reused every substep: no allocation in the hot path
+    ti.running = this.running;
+    ti.powerFrac = (combustion * this.omega) / this.ratedW;
+    ti.load = combustion / p.peakTorqueNm;
+    ti.rpm = now;
+    ti.redlineRpm = p.redlineRpm;
+    ti.kmh = kmh;
+    ti.boostBar = this.boostBar;
+    ti.fuelCut = this.fuelCut;
+    const flags = th.update(h, ti);
     if (!this.blown) {
       if (flags & 1) this.events.push({ type: 'overheat', coolantC: th.coolantC });
       if (flags & 2) this.events.push({ type: 'overrev', rpm: now, severity: overrevSeverity(now, p.redlineRpm) });
