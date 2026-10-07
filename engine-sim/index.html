@@ -33,22 +33,28 @@
 
     <header class="hud-top">
       <section class="tach" aria-label="Engine telemetry">
-        <div class="tach-row">
-          <output id="rpm" class="rpm-value" aria-live="off">800</output>
-          <span class="unit">RPM</span>
-          <span id="limiter" class="pill pill-red" hidden>LIMITER</span>
+        <div id="shift-lights" class="shift-lights" aria-hidden="true">
+          <i class="led"></i><i class="led"></i><i class="led"></i><i class="led"></i><i class="led"></i><i class="led"></i><i class="led"></i><i class="led"></i><i class="led"></i><i class="led"></i>
         </div>
-        <div class="rpm-bar" aria-hidden="true">
-          <div id="rpm-fill" class="rpm-fill"></div>
-          <div id="rpm-redline" class="rpm-redline"></div>
+        <div id="tach-digital" class="tach-digital">
+          <div class="tach-row">
+            <output id="rpm" class="rpm-value" aria-live="off">800</output>
+            <span class="unit">RPM</span>
+            <span id="limiter" class="pill pill-red" hidden>LIMITER</span>
+          </div>
+          <div class="rpm-bar" aria-hidden="true">
+            <div id="rpm-fill" class="rpm-fill"></div>
+            <div id="rpm-redline" class="rpm-redline"></div>
+          </div>
+          <div class="tach-row tach-sub">
+            <output id="gear" class="gear-badge">N</output>
+            <span id="mode-tag" class="mode-tag" hidden>AUTO</span>
+            <span class="speed"><output id="speed">0</output> <span id="speed-unit" class="unit">km/h</span></span>
+            <span id="traction" class="pill pill-amber" hidden>WHEELSPIN</span>
+          </div>
         </div>
-        <div class="tach-row tach-sub">
-          <output id="gear" class="gear-badge">N</output>
-          <span id="mode-tag" class="mode-tag" hidden>AUTO</span>
-          <span class="speed"><output id="speed">0</output> <span id="speed-unit" class="unit">km/h</span></span>
-          <span id="traction" class="pill pill-amber" hidden>WHEELSPIN</span>
-        </div>
-        <!-- Feature-owned HUD rows (gauges, shift lights) go here. -->
+        <canvas id="tach-dial" class="tach-dial" hidden role="img" aria-label="Analog tachometer"></canvas>
+        <!-- Gauges, assist pills and feature-owned HUD rows. -->
         <div id="hud-extra" class="hud-extra"></div>
       </section>
 
@@ -72,11 +78,29 @@
       </section>
     </header>
 
-    <!-- Feature-owned tool buttons (camera, display modes, game modes). -->
+    <!-- Tool buttons (camera, display modes, game modes), added from JS in order. -->
     <nav id="tool-rail" class="tool-rail" aria-label="View and mode tools"></nav>
 
     <!-- Feature-owned full-screen overlays (drag tree, dyno, labels). Pointer events off by default. -->
     <div id="overlay-root" class="overlay-root"></div>
+
+    <!-- Crank-angle scrubber, shown while the animation is frozen. -->
+    <section id="scrub" class="scrub" hidden aria-label="Frozen crank angle">
+      <button id="scrub-prev" class="icon-btn scrub-step" type="button" aria-label="Previous firing" title="Previous firing">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <div class="scrub-body">
+        <div class="scrub-head">
+          <span class="scrub-title">Crank</span>
+          <output id="scrub-deg" class="scrub-deg">0°</output>
+          <span id="scrub-info" class="scrub-info"></span>
+        </div>
+        <input id="scrub-range" class="scrub-range" type="range" min="0" max="720" step="1" value="0" aria-label="Crank angle in degrees">
+      </div>
+      <button id="scrub-next" class="icon-btn scrub-step" type="button" aria-label="Next firing" title="Next firing">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+    </section>
 
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
@@ -97,9 +121,9 @@
       </div>
       <div class="tiles">
         <div class="tile"><span class="tile-label">Peak rpm</span><output id="t-peak-rpm" class="tile-value">0</output></div>
-        <div class="tile"><span class="tile-label">Top speed</span><output id="t-top-speed" class="tile-value">0</output><span class="tile-unit">km/h</span></div>
-        <div class="tile"><span class="tile-label">0–100 km/h</span><output id="t-zero-100" class="tile-value">—</output><span class="tile-unit">s</span></div>
-        <div class="tile"><span class="tile-label">Distance</span><output id="t-distance" class="tile-value">0.00</output><span class="tile-unit">km</span></div>
+        <div class="tile"><span class="tile-label">Top speed</span><output id="t-top-speed" class="tile-value">0</output><span id="t-top-speed-unit" class="tile-unit">km/h</span></div>
+        <div class="tile"><span id="t-zero-label" class="tile-label">0–100 km/h</span><output id="t-zero-100" class="tile-value">—</output><span class="tile-unit">s</span></div>
+        <div class="tile"><span class="tile-label">Distance</span><output id="t-distance" class="tile-value">0.00</output><span id="t-distance-unit" class="tile-unit">km</span></div>
       </div>
 
       <div class="chart-block">
@@ -143,7 +167,16 @@
           <span class="gate-label" style="left:82%;top:98%">R</span>
           <div id="knob" class="knob" aria-hidden="true"></div>
         </div>
-        <p class="hint">Push and pull the lever</p>
+        <div id="paddles" class="paddles" role="group" aria-label="Sequential shifter" hidden>
+          <button id="paddle-up" class="paddle paddle-up" type="button" aria-label="Shift up" title="Shift up (E)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 15l7-7 7 7"/></svg><span>UP</span>
+          </button>
+          <output id="paddle-gear" class="paddle-gear" aria-label="Current gear">N</output>
+          <button id="paddle-down" class="paddle paddle-down" type="button" aria-label="Shift down" title="Shift down (Q)">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 9l7 7 7-7"/></svg><span>DOWN</span>
+          </button>
+        </div>
+        <p id="shifter-hint" class="hint">Push and pull the lever</p>
       </div>
       <div class="pedal-wrap">
         <div class="pedals">
@@ -159,57 +192,133 @@
     <!-- Settings sheet. -->
     <div id="settings" class="sheet-backdrop" hidden>
       <section class="panel sheet" role="dialog" aria-modal="true" aria-labelledby="settings-title">
-        <div class="panel-head">
-          <h2 id="settings-title">Engine &amp; gearbox</h2>
-          <button class="icon-btn small" type="button" data-close="settings" aria-label="Close settings">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
-          </button>
+        <div class="sheet-top">
+          <div class="panel-head">
+            <h2 id="settings-title">Engine &amp; gearbox</h2>
+            <button class="icon-btn small" type="button" data-close="settings" aria-label="Close settings">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+          <nav class="sheet-nav" aria-label="Settings sections">
+            <button type="button" class="nav-chip" data-target="sec-engine">Engine</button>
+            <button type="button" class="nav-chip" data-target="sec-induction">Induction</button>
+            <button type="button" class="nav-chip" data-target="sec-gearbox">Gearbox</button>
+            <button type="button" class="nav-chip" data-target="sec-gearing">Gearing</button>
+            <button type="button" class="nav-chip" data-target="sec-display">Display</button>
+          </nav>
         </div>
 
-        <fieldset class="field">
-          <legend>Engine</legend>
-          <div id="opt-preset" class="chips" role="radiogroup" aria-label="Engine type"></div>
-          <p id="opt-preset-note" class="field-note"></p>
-        </fieldset>
+        <button id="opt-garage" class="garage-link" type="button">
+          <span class="garage-link-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M3 10l9-6 9 6v10H3zM7 20v-6h10v6M7 17h10"/></svg>
+          </span>
+          <span class="garage-link-text">
+            <b>Garage</b>
+            <span id="opt-garage-note">Ready-made engine builds</span>
+          </span>
+          <svg class="garage-link-chev" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 6l6 6-6 6"/></svg>
+        </button>
 
-        <fieldset class="field">
-          <legend>Cylinders</legend>
-          <div id="opt-cylinders" class="chips" role="radiogroup" aria-label="Cylinder count"></div>
-        </fieldset>
-
-        <div class="field-grid">
-          <label class="field range-field" for="opt-idle">
-            <span class="field-label">Idle <output id="opt-idle-out">800</output> rpm</span>
-            <input id="opt-idle" type="range" min="500" max="1300" step="50" value="800">
-          </label>
-          <label class="field range-field" for="opt-redline">
-            <span class="field-label">Redline <output id="opt-redline-out">7000</output> rpm</span>
-            <input id="opt-redline" type="range" min="4500" max="9500" step="100" value="7000">
-          </label>
-          <label class="field range-field" for="opt-bore">
-            <span class="field-label">Bore / stroke <output id="opt-bore-out">1.00</output></span>
-            <input id="opt-bore" type="range" min="0.7" max="1.4" step="0.01" value="1">
-            <span id="opt-bore-note" class="field-note"></span>
-          </label>
+        <section id="sec-engine" class="sheet-section" aria-labelledby="sec-engine-title">
+          <h3 id="sec-engine-title" class="section-title">Engine</h3>
           <fieldset class="field">
-            <legend>Animation speed</legend>
-            <div id="opt-visual" class="chips" role="radiogroup" aria-label="Animation speed"></div>
+            <legend>Layout</legend>
+            <div id="opt-preset" class="chips" role="radiogroup" aria-label="Engine type"></div>
+            <p id="opt-preset-note" class="field-note"></p>
           </fieldset>
-        </div>
+          <fieldset class="field">
+            <legend>Cylinders</legend>
+            <div id="opt-cylinders" class="chips" role="radiogroup" aria-label="Cylinder count"></div>
+          </fieldset>
+          <div class="field-grid">
+            <label class="field range-field" for="opt-displacement">
+              <span class="field-label">Displacement <output id="opt-displacement-out">6.2</output> L</span>
+              <input id="opt-displacement" type="range" min="0.6" max="8" step="0.1" value="5">
+            </label>
+            <label class="field range-field" for="opt-bore">
+              <span class="field-label">Bore / stroke <output id="opt-bore-out">1.00</output></span>
+              <input id="opt-bore" type="range" min="0.7" max="1.4" step="0.01" value="1">
+            </label>
+            <label class="field range-field" for="opt-idle">
+              <span class="field-label">Idle <output id="opt-idle-out">800</output> rpm</span>
+              <input id="opt-idle" type="range" min="500" max="1300" step="50" value="800">
+            </label>
+            <label class="field range-field" for="opt-redline">
+              <span class="field-label">Redline <output id="opt-redline-out">7000</output> rpm</span>
+              <input id="opt-redline" type="range" min="4500" max="9500" step="100" value="7000">
+            </label>
+          </div>
+          <p id="opt-bore-note" class="field-note field-note-tight"></p>
+          <div id="opt-vvl-block" class="switch-block">
+            <label class="switch-row" for="opt-vvl">
+              <span class="switch-text">
+                <span class="switch-label">Variable valve lift</span>
+                <span class="switch-note">Switches to a high-lift cam for a top-end kick</span>
+              </span>
+              <button id="opt-vvl" class="switch" type="button" role="switch" aria-checked="false"></button>
+            </label>
+            <label id="opt-vvl-field" class="field range-field sub-field" for="opt-vvl-rpm">
+              <span class="field-label">Cam switch at <output id="opt-vvl-rpm-out">5500</output> rpm</span>
+              <input id="opt-vvl-rpm" type="range" min="2500" max="9000" step="100" value="5500">
+            </label>
+          </div>
+        </section>
 
-        <fieldset class="field">
-          <legend>Transmission</legend>
+        <section id="sec-induction" class="sheet-section" aria-labelledby="sec-induction-title">
+          <h3 id="sec-induction-title" class="section-title">Forced induction</h3>
+          <div id="opt-induction" class="chips" role="radiogroup" aria-label="Induction">
+            <button type="button" class="chip" role="radio" data-value="na">Natural</button>
+            <button type="button" class="chip" role="radio" data-value="turbo">Turbo</button>
+            <button type="button" class="chip" role="radio" data-value="twin-turbo">Twin-turbo</button>
+            <button type="button" class="chip" role="radio" data-value="supercharger">Supercharger</button>
+          </div>
+          <p id="opt-induction-note" class="field-note"></p>
+          <label id="opt-boost-field" class="field range-field sub-field" for="opt-boost">
+            <span class="field-label">Boost target <output id="opt-boost-out">0.80</output> bar</span>
+            <input id="opt-boost" type="range" min="0.3" max="2" step="0.05" value="0.8">
+          </label>
+        </section>
+
+        <section id="sec-gearbox" class="sheet-section" aria-labelledby="sec-gearbox-title">
+          <h3 id="sec-gearbox-title" class="section-title">Transmission</h3>
           <div id="opt-mode" class="chips" role="radiogroup" aria-label="Transmission mode">
             <button type="button" class="chip" role="radio" data-value="manual">H-pattern</button>
             <button type="button" class="chip" role="radio" data-value="sequential">Sequential</button>
             <button type="button" class="chip" role="radio" data-value="auto">Automatic</button>
           </div>
-          <p class="field-note">Automatic shifts up near redline and down below 2000 rpm; the clutch is automated.</p>
-        </fieldset>
+          <p id="opt-mode-note" class="field-note">Automatic shifts up near redline and down below 2000 rpm; the clutch is automated.</p>
+          <div class="switch-block">
+            <label id="opt-autoblip-row" class="switch-row" for="opt-autoblip">
+              <span class="switch-text">
+                <span class="switch-label">Auto-blip</span>
+                <span class="switch-note">Blips the throttle to match revs on downshifts</span>
+              </span>
+              <button id="opt-autoblip" class="switch" type="button" role="switch" aria-checked="false"></button>
+            </label>
+            <label class="switch-row" for="opt-launch">
+              <span class="switch-text">
+                <span class="switch-label">Launch control</span>
+                <span class="switch-note">Holds the revs while you wait at a standstill</span>
+              </span>
+              <button id="opt-launch" class="switch" type="button" role="switch" aria-checked="false"></button>
+            </label>
+            <label id="opt-launch-field" class="field range-field sub-field" for="opt-launch-rpm">
+              <span class="field-label">Launch at <output id="opt-launch-rpm-out">4500</output> rpm</span>
+              <input id="opt-launch-rpm" type="range" min="2500" max="8000" step="100" value="4500">
+            </label>
+            <label class="switch-row" for="opt-tc">
+              <span class="switch-text">
+                <span class="switch-label">Traction control</span>
+                <span class="switch-note">Cuts torque when the rear tyres break loose</span>
+              </span>
+              <button id="opt-tc" class="switch" type="button" role="switch" aria-checked="false"></button>
+            </label>
+          </div>
+        </section>
 
-        <fieldset class="field">
-          <legend>Gear ratios</legend>
-          <div id="opt-ratio-presets" class="chips" aria-label="Ratio presets"></div>
+        <section id="sec-gearing" class="sheet-section" aria-labelledby="sec-gearing-title">
+          <h3 id="sec-gearing-title" class="section-title">Gearing</h3>
+          <div id="opt-ratio-presets" class="chips" role="radiogroup" aria-label="Ratio presets"></div>
           <div class="ratio-grid">
             <label for="opt-r1">1st<input id="opt-r1" data-gear="0" type="number" inputmode="decimal" step="0.01" min="0.4" max="6"></label>
             <label for="opt-r2">2nd<input id="opt-r2" data-gear="1" type="number" inputmode="decimal" step="0.01" min="0.4" max="6"></label>
@@ -221,7 +330,57 @@
             <label for="opt-tire">Tyre ⌀ cm<input id="opt-tire" type="number" inputmode="decimal" step="0.5" min="40" max="100"></label>
           </div>
           <p id="opt-gearing-note" class="field-note"></p>
-        </fieldset>
+        </section>
+
+        <section id="sec-display" class="sheet-section" aria-labelledby="sec-display-title">
+          <h3 id="sec-display-title" class="section-title">Display</h3>
+          <div class="switch-block switch-grid">
+            <label class="switch-row" for="opt-strokes">
+              <span class="switch-text"><span class="switch-label">Stroke colours</span><span class="switch-note">Intake, compression, power, exhaust</span></span>
+              <button id="opt-strokes" class="switch" type="button" role="switch" aria-checked="true"></button>
+            </label>
+            <label class="switch-row" for="opt-valvetrain">
+              <span class="switch-text"><span class="switch-label">Valvetrain</span><span class="switch-note">Cams, valves and timing drive</span></span>
+              <button id="opt-valvetrain" class="switch" type="button" role="switch" aria-checked="true"></button>
+            </label>
+            <label class="switch-row" for="opt-xray">
+              <span class="switch-text"><span class="switch-label">X-ray</span><span class="switch-note">See-through moving parts</span></span>
+              <button id="opt-xray" class="switch" type="button" role="switch" aria-checked="false"></button>
+            </label>
+            <label class="switch-row" for="opt-cutaway">
+              <span class="switch-text"><span class="switch-label">Cutaway</span><span class="switch-note">Slice the block open</span></span>
+              <button id="opt-cutaway" class="switch" type="button" role="switch" aria-checked="false"></button>
+            </label>
+          </div>
+          <div class="field-grid">
+            <fieldset class="field">
+              <legend>Cluster</legend>
+              <div id="opt-cluster" class="chips" role="radiogroup" aria-label="Cluster style">
+                <button type="button" class="chip" role="radio" data-value="digital">Digital</button>
+                <button type="button" class="chip" role="radio" data-value="analog">Analog</button>
+              </div>
+            </fieldset>
+            <fieldset class="field">
+              <legend>Speed units</legend>
+              <div id="opt-units" class="chips" role="radiogroup" aria-label="Speed units">
+                <button type="button" class="chip" role="radio" data-value="kmh">km/h</button>
+                <button type="button" class="chip" role="radio" data-value="mph">mph</button>
+              </div>
+            </fieldset>
+            <fieldset class="field">
+              <legend>Quality</legend>
+              <div id="opt-quality" class="chips" role="radiogroup" aria-label="Render quality">
+                <button type="button" class="chip" role="radio" data-value="auto">Auto</button>
+                <button type="button" class="chip" role="radio" data-value="high">High</button>
+                <button type="button" class="chip" role="radio" data-value="low">Low</button>
+              </div>
+            </fieldset>
+            <fieldset class="field">
+              <legend>Animation speed</legend>
+              <div id="opt-visual" class="chips" role="radiogroup" aria-label="Animation speed"></div>
+            </fieldset>
+          </div>
+        </section>
 
         <!-- Feature-owned settings sections. -->
         <div id="settings-extra" class="panel-extra"></div>
@@ -231,6 +390,22 @@
           <button id="btn-view" class="text-btn" type="button">Reset camera</button>
           <button class="primary-btn" type="button" data-close="settings">Done</button>
         </div>
+      </section>
+    </div>
+
+    <!-- Garage sheet: ready-made builds from src/presets.js. -->
+    <div id="garage" class="sheet-backdrop" hidden>
+      <section class="panel sheet garage-sheet" role="dialog" aria-modal="true" aria-labelledby="garage-title">
+        <div class="sheet-top">
+          <div class="panel-head">
+            <h2 id="garage-title">Garage</h2>
+            <button id="btn-garage-close" class="icon-btn small" type="button" aria-label="Close garage">
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18"/></svg>
+            </button>
+          </div>
+          <p class="sheet-sub">Tap a build to drop it in. Tune it further in Settings.</p>
+        </div>
+        <div id="garage-list" class="garage-list" role="list"></div>
       </section>
     </div>
 
