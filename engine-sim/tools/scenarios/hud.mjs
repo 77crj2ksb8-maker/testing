@@ -29,7 +29,10 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
   }, [...CHROME, ...extra]);
   const hit = (a, b) => a.l < b.r - 0.5 && b.l < a.r - 0.5 && a.t < b.b - 0.5 && b.t < a.b - 0.5;
   // Let CSS transitions (the toast's 8 px slide-in) finish: headless frames are slow enough to catch them mid-way.
-  const rest = () => evaluate(() => Promise.allSettled(document.getAnimations().filter((a) => a instanceof window.CSSTransition).map((a) => a.finished)).then(() => true));
+  const rest = () => evaluate(() => {
+    for (const a of document.getAnimations()) if (a instanceof window.CSSTransition) a.finish();
+    return true;
+  });
   async function checkLayout(label, extra = []) {
     await rest();
     const { boxes, w, h } = await rects(extra);
@@ -370,7 +373,11 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
   await tap('#tool-cinematic');
   const cine = await evaluate(() => ({ view: window.__app.view.cinematic, pressed: document.getElementById('tool-cinematic').getAttribute('aria-pressed') }));
   expect(cine.view === true && cine.pressed === 'true', `cinematic orbit on (${JSON.stringify(cine)})`);
-  await evaluate(() => window.__app.view.resetView());
+  await evaluate(() => {
+    const v = window.__app.view;
+    v.resetView(); // the real view drops the orbit here
+    if (v.cinematic) v.setCinematic(false); // the placeholder view does not
+  });
   await page.waitForTimeout(900);
   const cineOff = await evaluate(() => ({ view: window.__app.view.cinematic, pressed: document.getElementById('tool-cinematic').getAttribute('aria-pressed') }));
   expect(cineOff.view === false && cineOff.pressed === 'false', `the cinematic button releases when the view drops the orbit (${JSON.stringify(cineOff)})`);
@@ -484,6 +491,8 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
         stallW: Math.round(stall.width),
         stallHits: buttons.filter((b) => hits(b, stall)).length,
         toastHits: buttons.filter((b) => hits(b, toast)).length,
+        toast: [toast.left, toast.top, toast.right, toast.bottom].map(Math.round).join(','),
+        hit: [...document.querySelectorAll('#tool-rail .tool-btn')].filter((b) => hits(r(b), toast) || hits(r(b), stall)).map((b) => `${b.id}@${[r(b).left, r(b).top, r(b).right, r(b).bottom].map(Math.round).join(',')}`).join(' '),
         toastStall: hits(toast, stall),
         stallOnControls: ['.shifter-wrap', '.pedal-wrap', '.tach'].some((s) => hits(r(document.querySelector(s)), stall)),
       };

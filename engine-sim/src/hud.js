@@ -521,7 +521,7 @@ export class Hud {
     let any = false;
     for (const k of Object.keys(want)) {
       if (this.pills[k].hidden === want[k]) this.pills[k].hidden = !want[k];
-      any ||= want[k];
+      if (want[k]) any = true;
     }
     if (this.pillRow.hidden === any) {
       this.pillRow.hidden = !any;

@@ -263,6 +263,8 @@ export default {
     window.addEventListener('resize', place);
     window.visualViewport?.addEventListener('resize', place);
     let placed = false;
+    // Rows and columns depend on the button count: re-place when a feature adds or removes one later.
+    new window.MutationObserver(() => placed && place()).observe(rail, { childList: true });
 
     // ── Bus wiring ──────────────────────────────────────────────────────────
     let displayShown = '';
