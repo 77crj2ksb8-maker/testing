@@ -89,6 +89,9 @@ test('sequential: pulls away on the automated clutch and flat-shifts upward', ()
   const n = r.of('shift').length;
   r.run(1, { gas: 1 });
   assert.equal(r.of('shift').length, n, 'one event per shift');
+  const rec = r.tracker.shiftRecords[0];
+  assert.equal(rec.note, 'Flat shift');
+  assert.ok(rec.from === 1 && rec.to === 2 && rec.score >= 85, `flat shift scored ${rec.score}`);
 });
 
 test('sequential: lifted upshift is not flat; two quick taps queue', () => {

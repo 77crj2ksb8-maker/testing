@@ -205,9 +205,9 @@ export class Gearbox {
         // Selecting a gear while rolling in neutral: rev-match as on a downshift.
         this.shift = { from, to: gear, down: true, flat: false, phase: 'close', t: 0, source: 'sequential' };
         this.blipRpm = null;
-        this.tracker?.engage(gear, sim, { auto: true });
+        this.tracker?.engage(gear, sim, { auto: true, note: 'Sequential' });
       } else if (typeof gear === 'number') {
-        this.tracker?.engage(gear, sim, { auto: true });
+        this.tracker?.engage(gear, sim, { auto: true, note: 'Sequential' });
       }
       this.emitShift(from, gear, 'sequential', false);
       return { ok: true, gear: sim.gear };
@@ -297,7 +297,10 @@ export class Gearbox {
       // The drivetrain drags the revs down to the new gear under the cut.
       sim.torqueCut = true;
       this.autoPedal = pedalForEngagement(0.55 + 0.45 * smooth(s.t / FLAT_SYNC));
-      if (s.t >= FLAT_SYNC) this.endShift();
+      if (s.t >= FLAT_SYNC) {
+        this.tracker?.engage(s.to, sim, { auto: true, note: 'Flat shift' });
+        this.endShift();
+      }
     } else if (s.phase === 'open') {
       this.autoPedal = 1;
       // Rev-match a downshift with a throttle blip; cut torque on an upshift.
@@ -322,7 +325,8 @@ export class Gearbox {
   swapGear(s, nextPhase) {
     const sim = this.sim;
     sim.setGear(s.to);
-    this.tracker?.engage(s.to, sim, { auto: true });
+    // A flat shift is judged once the drivetrain has pulled the revs into line.
+    if (!s.flat) this.tracker?.engage(s.to, sim, { auto: true, note: s.source === 'sequential' ? 'Sequential' : null });
     this.emitShift(s.from, s.to, s.source, s.flat);
     if (s.flat) sim.backfire?.('shift', 0.55 + 0.45 * sim.rng());
     s.phase = nextPhase;
@@ -446,7 +450,7 @@ export class ShiftTracker {
     this.leftAt = time;
   }
 
-  engage(gear, sim, { clutchless = false, auto = false } = {}) {
+  engage(gear, sim, { clutchless = false, auto = false, note = null } = {}) {
     const from = this.leftFrom;
     const launch = !from || sim.speedKmh < 3;
     this.pending = {
@@ -456,6 +460,7 @@ export class ShiftTracker {
       launch,
       clutchless,
       auto,
+      note,
       biteMismatch: null,
       slipEnergy: 0,
     };
@@ -500,7 +505,7 @@ export class ShiftTracker {
       else score = 100 - mismatch / 40 - kj * 2 - Math.max(0, age - 0.8) * 15;
       score = Math.round(clamp(score, 0, 100));
       const grade = score >= 85 ? 'Smooth' : score >= 60 ? 'OK' : 'Rough';
-      const note = s.launch ? 'Launch' : s.auto ? 'Auto' : s.clutchless ? 'Clutchless' : '';
+      const note = s.launch ? 'Launch' : s.note ?? (s.auto ? 'Auto' : s.clutchless ? 'Clutchless' : '');
       this.push({
         from: s.from, to: s.to, time: sim.time, duration: age, mismatchRpm: Math.round(mismatch),
         slipKj: kj, score, grade, note, launch: s.launch,
