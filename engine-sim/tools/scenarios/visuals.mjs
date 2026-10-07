@@ -185,6 +185,19 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   await frames(2);
   const v12 = await calls();
   log(`V12 twin-turbo, all effects: ${v12} draw calls`);
+  // From underneath, the whole length shows: block front to tailpipe tips.
+  await snapTo('under');
+  const under = await evaluate(() => {
+    const v = window.__app.view;
+    v.camera.updateMatrixWorld();
+    const b = v.bounds;
+    const c = b.getCenter(new v.tmp.constructor());
+    const ends = [b.min.z, b.max.z].map((z) => new v.tmp.constructor(c.x, c.y, z).project(v.camera));
+    return ends.map((p) => Math.max(Math.abs(p.x), Math.abs(p.y)));
+  });
+  expect(under.every((d) => d < 1), `underside view keeps both ends in frame (${under.map((d) => d.toFixed(2)).join(', ')})`);
+  await shot('vis-v12-under');
+  await snapTo('hero');
   expect(v12 > 0 && v12 < DRAW_CALL_BUDGET, `V12 with everything on stays under ${DRAW_CALL_BUDGET} draw calls (${v12})`);
   await apply({ induction: 'supercharger', xray: true, cutaway: true }, 'all');
   const v12b = await calls();
@@ -236,6 +249,30 @@ export default async function visuals({ page, evaluate, advance, shot, expect, l
   expect(rot.layout === 'rotary' && rot.ports === 4 && !rot.valves, `rotary shows ports instead of valves (${rot.ports})`);
   expect(rot.turbos === 2 && rot.gap >= 1.45, `twin turbos sit apart (${rot.gap.toFixed(2)} bores)`);
   await shot('vis-rotary');
+  // Exploded rotary: housings and plates fan out along the shaft, rotors keep turning.
+  await evaluate(() => window.__app.view.setExplode(1));
+  await until(() => window.__app.view.explodeT === 1);
+  await evaluate(() => { window.__rotorX = window.__app.view.rotors[0].rotor.position.x; });
+  await advance(0.2, { gas: 0.3 });
+  await frames(2);
+  const rex = await evaluate(() => {
+    const v = window.__app.view;
+    const [a, b] = v.rotors;
+    return {
+      front: a.zNow - a.z, spread: (a.zNow - b.zNow) - (a.z - b.z),
+      withHousing: a.rotor.position.z === a.housing.position.z,
+      turning: Math.abs(a.rotor.position.x - window.__rotorX),
+    };
+  });
+  expect(rex.front > 0.3 && rex.spread > 0.3 && rex.withHousing, `rotary stack fans out (front ${rex.front.toFixed(2)}, gap +${rex.spread.toFixed(2)})`);
+  expect(rex.turning > 1e-4, 'rotors keep orbiting in the exploded rotary');
+  await shot('vis-rotary-exploded');
+  await evaluate(() => {
+    const v = window.__app.view;
+    v.setExplode(0);
+    v.explodeT = 0;
+    v.applyExplode(0);
+  });
 
   // Turbo boxer-4: flat, opposed pistons, a head on each side.
   await garage('rally-boxer');

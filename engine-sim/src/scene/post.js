@@ -1,6 +1,7 @@
 // Post-processing: a selective bloom. Only objects on BLOOM_LAYER (flames,
 // combustion, hot exhaust, sparks) are rendered into a small bloom pre-pass,
-// without the environment map, so chrome highlights never bloom. The halo is
+// without the environment map or the lights, so only emissive light blooms:
+// chrome and pipe highlights never do. The halo is
 // then added over the normal render. Built lazily the first time it is on.
 
 import * as THREE from 'three';
@@ -30,6 +31,14 @@ export class PostFX {
     this.enabled = false;
     this.width = 1;
     this.height = 1;
+    this.lights = [];
+    this.saved = new Float32Array(0);
+  }
+
+  /** Lights to switch off during the bloom pre-pass (intensity 0, so no shader recompiles). */
+  setLights(lights) {
+    this.lights = lights;
+    this.saved = new Float32Array(lights.length);
   }
 
   build() {
@@ -97,10 +106,16 @@ export class PostFX {
     // Bloom pre-pass: glowing objects only, on black, without reflections.
     scene.background = this.black;
     scene.environmentIntensity = 0;
+    const { lights, saved } = this;
+    for (let i = 0; i < lights.length; i++) {
+      saved[i] = lights[i].intensity;
+      lights[i].intensity = 0;
+    }
     camera.layers.set(BLOOM_LAYER);
     this.bloomComposer.render();
     camera.layers.mask = mask;
     scene.environmentIntensity = envIntensity;
+    for (let i = 0; i < lights.length; i++) lights[i].intensity = saved[i];
     if (background?.isColor) {
       if (this.bgFor !== background.getHex()) {
         this.bgFor = background.getHex();

@@ -170,9 +170,14 @@ export const EXPLODE = Object.freeze({
   clutch: 0.7,
   flywheel: 0.35,
   gearbox: 2.2,
+  stack: 0.55, // rotary housings and plates, along the shaft, per stack position from the rear plate
 });
 
-/** Engine-frame offset [x, y, z] of an exploded part at explode level t (0..1). */
+/**
+ * Engine-frame offset [x, y, z] of an exploded part at explode level t (0..1).
+ * 'stack' is the travel of one stack position; callers scale it by the
+ * part's position in the stack.
+ */
 export function explodeOffset(part, bankDeg, t, B, out) {
   const d = (EXPLODE[part] ?? 0) * B * t;
   const ax = Math.sin(bankDeg * DEG);
@@ -192,7 +197,7 @@ export function explodeOffset(part, bankDeg, t, B, out) {
     out[1] = ay * h - (flat ? d : 0);
   } else if (part === 'intake') out[1] = d;
   else if (part === 'sump') out[1] = -d;
-  else if (part === 'front' || part === 'kit') out[2] = d;
+  else if (part === 'front' || part === 'kit' || part === 'stack') out[2] = d;
   else out[2] = -d; // bell, clutch, flywheel, gearbox move back
   return out;
 }

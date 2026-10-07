@@ -27,7 +27,9 @@ import { Effects } from './scene/effects.js';
 import { CameraRig, CAMERA_PRESETS } from './scene/camera.js';
 import { PostFX, markBloom } from './scene/post.js';
 import { StrokeLabels } from './scene/labels.js';
-import { initialQuality, adaptQuality, QUALITY_WINDOW } from './scene/quality.js';
+import {
+  initialQuality, adaptQuality, typicalFrameMs, QUALITY_WINDOW,
+} from './scene/quality.js';
 import { strokeIndex, rotaryPortFlow } from './scene/timing.js';
 
 const v3 = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
@@ -102,6 +104,7 @@ export class EngineView {
     markBloom(this.effects.sparks.points);
     this.rig = new CameraRig(this.camera, this.controls);
     this.post = new PostFX(this.renderer, this.scene, this.camera);
+    this.post.setLights([hemi, key, rim, ...this.flashLights, this.fxLight]);
     this.labels = new StrokeLabels(canvas);
 
     this.root = null;
@@ -156,6 +159,7 @@ export class EngineView {
     this.rodGeo = null;
     this.ports = null;
     this.dl = null;
+    this.explodeCore = null;
     this.hiddenRod = -1;
     const wasBlown = !!this.blown;
     this.blown = null;
@@ -175,7 +179,9 @@ export class EngineView {
     const size = box.getSize(v3());
     this.floor.scale.set(size.z * 1.9, size.z * 1.9, 1);
     this.floor.position.set(box.getCenter(this.tmp).x, box.min.y - 0.05, box.getCenter(this.tmp).z);
-    this.labels.setCount(profile.kind === 'rotary' ? profile.firingOrder : profile.cylinders.map((c) => c.num));
+    this.labels.setCount(profile.kind === 'rotary'
+      ? this.rotors.map((_, i) => i + 1)
+      : profile.cylinders.map((c) => c.num));
 
     // Bounds of the fully exploded assembly, so the camera can follow the parts out.
     this.applyExplode(1);
@@ -442,7 +448,9 @@ export class EngineView {
       const g = groups[0];
       const order = g.ports.map((p, i) => i).sort((a, b) => g.ports[b].z - g.ports[a].z);
       const h = Math.ceil(order.length / 2);
-      groups = [order.slice(0, h), order.slice(h)].map((idx) => ({ ...g, ports: idx.map((i) => g.ports[i]), members: idx }));
+      groups = [order.slice(0, h), order.slice(h)].map((idx) => ({
+        ...g, ports: idx.map((i) => g.ports[i]), members: idx.map((i) => g.members[i]),
+      }));
     }
     const plan = planExhaust(groups, B, { mid: turbo });
     const ind = new Induction({
@@ -578,9 +586,10 @@ export class EngineView {
       dir = v3(-0.9, 0.5, -0.5);
       k = 0.6;
     } else if (id === 'under') {
-      target = center.clone();
+      // From below, the whole length matters: the pipes run back past the gearbox.
+      target = sphere.center.clone();
       dir = v3(0.6, -0.72, 0.65);
-      k = 0.95;
+      k = this.fitAll() / dist;
     }
     const position = target.clone().addScaledVector(dir.normalize(), dist * k);
     return { target, position, dist };
@@ -695,13 +704,13 @@ export class EngineView {
         k.rotor.rotation.z = pose.rotation;
         const since = rotorDegreesSinceFiring(crankDeg, k.phase);
         const f = burning ? combustionFlash(since, 110) * strength : 0;
-        setRotZ(this.m4, 0, 0.55, 0, -(R - e) * 0.72, k.z);
+        setRotZ(this.m4, 0, 0.55, 0, -(R - e) * 0.72, k.zNow);
         this.m4.elements[0] = 2.2;
         this.m4.elements[10] = 1.4;
         this.glows.setMatrixAt(i, this.m4);
         this.glows.setColorAt(i, this.color.setRGB(f * 1.0, f * 0.26, f * 0.05));
         if (f > 0.01) lit.push(f, i);
-        this.tmp.set(0, -(R - e) * 0.72, k.z).applyMatrix4(this.core.matrix);
+        this.tmp.set(0, -(R - e) * 0.72, k.zNow).applyMatrix4(this.core.matrix);
         this.writeSparks(i, f, this.tmp, 0.5);
         rotaryPortFlow(since, flow);
         this.portMarks.setColorAt(i * 2, this.color.setRGB(0.2 * flow[0], 0.45 * flow[0], 1.3 * flow[0]));
@@ -709,7 +718,7 @@ export class EngineView {
         if (frozen) {
           // The face that fired last: expanding for 270° of shaft, then exhausting.
           strokes.push(since < 270 ? 0 : 1);
-          labelPts.push(this.engine.localToWorld(k.label.set(-(R + 0.75), 0.2, k.z)));
+          labelPts.push(this.engine.localToWorld(k.label.set(-(R + 0.75), 0.2, k.zNow)));
         }
       }
       this.glows.instanceMatrix.needsUpdate = true;
@@ -772,7 +781,7 @@ export class EngineView {
       if (best >= 0) {
         const idx = lit[best + 1];
         lit[best] = 0;
-        if (p.kind === 'rotary') this.tmp.set(0, -(this.geom.R - this.geom.e) * 0.72, this.rotors[idx].z).applyMatrix4(this.core.matrix);
+        if (p.kind === 'rotary') this.tmp.set(0, -(this.geom.R - this.geom.e) * 0.72, this.rotors[idx].zNow).applyMatrix4(this.core.matrix);
         else {
           const k = this.cyls[idx];
           const mid = this.geom.deck * 0.92;
@@ -874,6 +883,7 @@ export class EngineView {
       e.obj.position.set(e.base.x + this.off[0], e.base.y + this.off[1], e.base.z + this.off[2]);
     }
     this.valvetrain?.setExplode(t);
+    this.explodeCore?.(t);
     if (this.inductionHw?.belt) this.inductionHw.belt.visible = t < 0.01;
   }
 
@@ -1092,8 +1102,8 @@ export class EngineView {
       z = this.cyls[best].z;
       this.thrown.quaternion.setFromRotationMatrix(this.m4);
     } else {
-      rodPos = v3(0, 0, this.rotors[0].z);
-      z = this.rotors[0].z;
+      rodPos = v3(0, 0, this.rotors[0].zNow);
+      z = this.rotors[0].zNow;
       this.thrown.rotation.set(0, 0, 0);
     }
     this.engine.localToWorld(rodPos);
@@ -1152,11 +1162,11 @@ export class EngineView {
    */
   adaptQuality(frameMs) {
     const t = this.frameTimes;
-    t.push(Math.min(frameMs, 100)); // one hitch (shader compile, tab switch) must not sink the average
+    t.push(frameMs);
     if (t.length < QUALITY_WINDOW) return;
-    let sum = 0;
-    for (const v of t) sum += v;
+    // The median: a few hitches (shader compiles, a rebuild) must not read as a slow device.
+    const typical = typicalFrameMs(t);
     t.length = 0;
-    if (adaptQuality(this.quality, sum / QUALITY_WINDOW)) this.applyQuality();
+    if (adaptQuality(this.quality, typical)) this.applyQuality();
   }
 }

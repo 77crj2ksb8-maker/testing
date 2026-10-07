@@ -4,6 +4,7 @@
 import * as THREE from 'three';
 import { DEG, epitrochoid } from '../kinematics.js';
 import { cylAlongZ, gearGeometry, merge, withEdges, setRotZ } from './geometry.js';
+import { explodeOffset } from './layout.js';
 
 const v3 = (x = 0, y = 0, z = 0) => new THREE.Vector3(x, y, z);
 
@@ -84,6 +85,19 @@ export function buildRotary(view, p) {
   const plugs = view.instanced(plugGeo, M.ceramic, n * 2, core, false);
   // Port positions on the bore (core frame): exhaust leads, intake trails.
   const portAt = (deg, rad) => epitrochoid(deg * DEG, R + rad, e * (rad > 0 ? 0.6 : 1));
+  const PORTS = [[60, 1], [120, 0]]; // [bore angle, 0 intake | 1 exhaust]
+  // Plugs and port markers of rotor i at stack position z (core frame).
+  const poseStatics = (i, z) => {
+    for (const [k, dx] of [[0, -0.32], [1, 0.32]]) {
+      setRotZ(view.m4, 0, 1, dx, -(R - e) - 0.42, z);
+      plugs.setMatrixAt(i * 2 + k, view.m4);
+    }
+    for (const [deg, kind] of PORTS) {
+      const [bx, by] = portAt(deg, 0);
+      setRotZ(view.m4, 0, 1, bx * 1.04, by * 1.04, z);
+      view.portMarks.setMatrixAt(i * 2 + kind, view.m4);
+    }
+  };
 
   view.rotors = [];
   const exPorts = [];
@@ -109,16 +123,9 @@ export function buildRotary(view, p) {
     rotor.add(view.addMetal(new THREE.Mesh(internalGear, M.friction)));
     rotor.position.z = z;
     core.add(rotor);
-    setRotZ(view.m4, 0, 1, 0, 0, z);
     view.glows.setColorAt(i, view.color.setRGB(0, 0, 0));
-    for (const [k, dx] of [[0, -0.32], [1, 0.32]]) {
-      setRotZ(view.m4, 0, 1, dx, -(R - e) - 0.42, z);
-      plugs.setMatrixAt(i * 2 + k, view.m4);
-    }
-    [[60, 1], [120, 0]].forEach(([deg, kind]) => {
-      const [bx, by] = portAt(deg, 0);
-      setRotZ(view.m4, 0, 1, bx * 1.04, by * 1.04, z);
-      view.portMarks.setMatrixAt(i * 2 + kind, view.m4);
+    poseStatics(i, z);
+    PORTS.forEach(([deg, kind]) => {
       view.portMarks.setColorAt(i * 2 + kind, view.color.setRGB(0, 0, 0));
       // Outer housing point, turned into the engine frame (x, y) → (y, −x).
       const [ox, oy] = portAt(deg, 0.32);
@@ -127,13 +134,36 @@ export function buildRotary(view, p) {
       if (kind === 1) exPorts.push(p3);
       else inPorts.push({ p: p3, d });
     });
-    view.rotors.push({ rotor, phase: p.rotorPhases[i], z, label: v3() });
+    // zNow: where the rotor sits now, with the exploded view's stack offset.
+    view.rotors.push({ rotor, housing, stat, phase: p.rotorPhases[i], z, zNow: z, label: v3() });
   }
+  const plates = [];
   for (let i = 0; i <= n; i++) {
     const plate = new THREE.Mesh(plateGeo, M.glassDark);
     plate.position.z = half - gap / 2 - i * (W + gap);
     core.add(withEdges(plate, M.edge, 40));
+    plates.push({ plate, z: plate.position.z });
   }
+  // Exploded view: housings (with their rotors) and side plates fan out
+  // forwards along the shaft from the rear plate, which stays against the
+  // clutch; the eccentric shaft stays put.
+  const pitch = W + gap;
+  const rear = plates[n].z;
+  const off = [0, 0, 0];
+  view.explodeCore = (t) => {
+    const step = explodeOffset('stack', 0, t, view.geom.B, off)[2] / pitch;
+    const at = (z) => z + (z - rear) * step;
+    view.rotors.forEach((k, i) => {
+      k.zNow = at(k.z);
+      k.rotor.position.z = k.zNow;
+      k.housing.position.z = k.zNow;
+      k.stat.position.z = k.zNow + W * 0.2;
+      poseStatics(i, k.zNow);
+    });
+    for (const q of plates) q.plate.position.z = at(q.z);
+    plugs.instanceMatrix.needsUpdate = true;
+    view.portMarks.instanceMatrix.needsUpdate = true;
+  };
   core.updateMatrix();
   view.core = core;
   view.geom.lowY = -(R + 0.45);
