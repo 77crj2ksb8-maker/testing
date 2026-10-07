@@ -627,11 +627,12 @@ export default {
     }
 
     // Landscape phones: the dyno sheet runs full height between the tach and
-    // lever on the left and the top-right buttons and rail on the right, so
-    // mute, telemetry and settings stay reachable (it may cover the pedals:
-    // the car is strapped down). Too narrow there: the CSS right-hand sheet.
+    // lever on the left and the top-right buttons on the right, so mute,
+    // telemetry and settings stay reachable (it may cover the pedals: the car
+    // is strapped down). It keeps clear of the tool rail too when there is
+    // room, else covers rail buttons as the portrait sheet does. Too narrow
+    // even then: the CSS right-hand sheet.
     const landscapeQuery = matchMedia('(max-height: 500px)'); // the CSS landscape breakpoint
-    const DYNO_MIN_W = 330;
     const DYNO_MAX_W = 440;
     function placeDyno() {
       const node = dynoUi.root;
@@ -642,11 +643,16 @@ export default {
       const origin = overlay.getBoundingClientRect();
       const sa = safeArea.getBoundingClientRect();
       let l = sa.left - origin.left;
-      let r = sa.right - origin.left;
       for (const o of rectsOf([document.querySelector('.tach'), document.querySelector('.shifter-wrap')], origin)) l = Math.max(l, o.r);
-      const right = [document.querySelector('.hud-right'), ...(railEl ? railEl.children : [])];
-      for (const o of rectsOf(right, origin)) if (o.l > l) r = Math.min(r, o.l);
-      if (r - l < DYNO_MIN_W) return;
+      const rightEdge = (nodes) => {
+        let r = sa.right - origin.left;
+        for (const o of rectsOf(nodes, origin)) if (o.l > l) r = Math.min(r, o.l);
+        return r;
+      };
+      const hudRight = [document.querySelector('.hud-right')];
+      let r = rightEdge(hudRight.concat(railEl ? [...railEl.children] : []));
+      if (r - l < 330) r = rightEdge(hudRight);
+      if (r - l < 300) return;
       const w = Math.min(DYNO_MAX_W, r - l);
       node.style.left = `${Math.round(r - w)}px`;
       node.style.right = 'auto';
@@ -1245,8 +1251,9 @@ export default {
       plot.setRange(x0, x1, 0, top);
       const ctx = plot.begin();
       const xTicks = [];
-      const xStep = x1 - x0 > 7000 && plot.w < 380 ? 2000 : 1000;
-      for (let v = x0; v <= x1; v += xStep) xTicks.push({ v, label: `${v / 1000}k` });
+      // 1k ticks while the labels have room (~28 px each), else 2k.
+      const xStep = ((plot.w - plot.pad.l - plot.pad.r) * 1000) / (x1 - x0) < 28 ? 2000 : 1000;
+      for (let v = Math.ceil(x0 / xStep) * xStep; v <= x1; v += xStep) xTicks.push({ v, label: `${v / 1000}k` });
       const yTicks = [];
       for (let v = 0; v <= top + 1e-6; v += step) yTicks.push(v);
       plot.axes(ctx, xTicks, yTicks, (v) => String(Math.round(v)));

@@ -128,7 +128,6 @@ export default async function modes({ page, evaluate, advance, shot, expect, log
   } else {
     expect(dynoHard.length === 0, `dyno sheet clear of the tach and the top-right buttons${dynoHard.length ? ` (covers ${dynoHard.join(', ')})` : ''}`);
   }
-  if (landscape && measured) expect(dynoBox.rail.length === 0, `dyno sheet clear of the tool rail${dynoBox.rail.length ? ` (covers ${dynoBox.rail.join(', ')})` : ''}`);
   await shot('modes-dyno-ready');
   await tap('.mo-dyno .primary-btn');
   expect((await events('dyno:start')).length === 1, 'dyno:start emitted');
