@@ -354,17 +354,21 @@ const CSS = `
 .mo-ach-list li.is-on .mo-ach-ico svg { stroke: var(--good); }
 
 @media (max-height: 500px) {
-  /* Landscape phones: the drag card sits top-centre between the tach and the buttons. */
+  /* Landscape phones: the drag card and the slip sit top-centre, between the
+     tach and the buttons and clear of the lever and pedals below. */
   .mo-drag {
     top: calc(var(--safe-top) + 8px);
     left: 50%;
     right: auto;
     transform: translateX(-50%);
-    width: min(340px, calc(100% - 2 * 250px));
-    min-width: 290px;
+    width: calc(100% - 2 * (max(var(--safe-left), var(--safe-right)) + var(--gutter) + 230px));
+    max-width: 330px;
+    min-width: 250px;
     padding: 8px 10px 8px 8px;
-    gap: 10px;
+    gap: 9px;
   }
+  .mo-drag-msg { font-size: 14px; }
+  .mo-splits span { font-size: 10px; }
   .mo-bulb { width: 14px; height: 14px; }
   .mo-bulb.is-stage { width: 10px; height: 10px; }
   .mo-tree { gap: 4px; padding: 5px 4px; }
@@ -374,12 +378,16 @@ const CSS = `
     left: 50%;
     right: auto;
     transform: translateX(-50%);
-    width: min(290px, calc(100% - 2 * 250px));
-    min-width: 260px;
+    width: 224px;
     max-height: calc(100% - var(--safe-top) - var(--safe-bottom) - 16px);
-    padding-top: 12px;
-    line-height: 1.4;
+    padding: 10px 12px 18px;
+    font-size: 11px;
+    line-height: 1.35;
   }
+  .mo-slip h3 { font-size: 13px; letter-spacing: 0.06em; }
+  .mo-slip .mo-slip-sub { margin-bottom: 6px; }
+  .mo-slip-foot { flex-direction: column; gap: 0; margin: 6px 0 8px; }
+  .mo-stamp { top: 34px; font-size: 15px; }
   .mo-dyno {
     top: calc(var(--safe-top) + 8px);
     bottom: calc(var(--safe-bottom) + 8px);
@@ -780,7 +788,6 @@ export default {
       dyno.chartsDirty = true;
       dynoBtn.setAttribute('aria-pressed', 'true');
       dynoUi.root.hidden = false;
-      app.layout?.();
     }
 
     function mountRollers() {

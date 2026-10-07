@@ -66,6 +66,11 @@ export default async function modes({ page, evaluate, advance, shot, expect, log
   expect(r.foul, 'leaving before the green is a red light');
   expect((await events('drag:foul')).length === 1, 'drag:foul emitted');
   await shot('modes-drag-redlight');
+  await evaluate(() => window.__app.apply({ units: 'mph' }, 'hud'));
+  await page.waitForTimeout(400);
+  const units = await evaluate(() => [...document.querySelectorAll('.mo-drag .mo-num span')].map((n) => n.textContent));
+  expect(units.includes('mph') && units.includes('ft'), `drag card follows the units setting (${units.join(', ')})`);
+  await evaluate(() => window.__app.apply({ units: 'kmh' }, 'hud'));
   await page.keyboard.press('Escape');
   expect(await evaluate(() => !window.__app.modes.race.active && document.querySelector('.mo-drag').hidden), 'Esc leaves the drag strip');
 
