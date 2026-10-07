@@ -7,7 +7,7 @@ export default async function powertrain({ evaluate, advance, shot, expect, log 
     const s = window.__app.sim;
     return {
       rpm: s.rpm, kmh: s.speedKmh, gear: s.gear, running: s.running, blown: s.blown, damage: s.damage,
-      boost: s.boostBar, turboRpm: s.turboRpm, kind: s.inductionKind, layout: window.__app.profile.layout,
+      boost: s.boostBar, target: s.boostTarget, turboRpm: s.turboRpm, kind: s.inductionKind, layout: window.__app.profile.layout,
       launchActive: s.launchActive, coolant: s.coolantC, egt: s.egtC,
     };
   });
@@ -52,7 +52,7 @@ export default async function powertrain({ evaluate, advance, shot, expect, log 
   s = await advance(2.2, { gas: 1 });
   expect(s.kmh > 35, `launches on the automated clutch (${s.kmh.toFixed(0)} km/h)`);
   s = await state();
-  expect(s.boost > 0.5 && s.turboRpm > 80000, `turbo on boost (${s.boost.toFixed(2)} bar, ${Math.round(s.turboRpm)} turbo rpm)`);
+  expect(s.boost > 0.75 * s.target && s.turboRpm > 80000, `turbo on boost (${s.boost.toFixed(2)} of ${s.target} bar, ${Math.round(s.turboRpm)} turbo rpm)`);
   await shot('pt-boost');
 
   await clearEvents();

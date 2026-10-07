@@ -332,3 +332,31 @@ test('garage: every build matches its spec, idles, revs to its limiter and pulls
     assert.ok(!r.sim.blown && r.sim.damage === 0, g.id);
   }
 });
+
+test('sequential: picking a gear while rolling fast in neutral is refused when it would over-rev', () => {
+  const r = seq();
+  r.box.shiftUp();
+  r.run(2.2, { gas: 1 });
+  r.box.shiftUp();
+  r.run(2.2, { gas: 1 });
+  r.box.shiftUp();
+  r.run(2.5, { gas: 1 });
+  assert.equal(r.sim.gear, 3);
+  assert.ok(rpmOf(r.sim, 1) > r.profile.redlineRpm * 1.2);
+  // 3 → N through the lever, then tap up for 1st at speed.
+  assert.equal(r.box.request('N').ok, true);
+  assert.equal(r.sim.gear, 'N');
+  const no = r.box.shiftUp();
+  assert.equal(no.ok, false);
+  assert.match(no.reason, /Too fast for 1st/);
+  assert.equal(r.sim.gear, 'N');
+  const lever = r.box.request(1);
+  assert.equal(lever.ok, false);
+  // A gear that fits is fine and rev-matched on the way in.
+  assert.ok(rpmOf(r.sim, 3) < r.profile.redlineRpm - 500);
+  assert.equal(r.box.request(3).ok, true);
+  r.run(1, {});
+  assert.equal(r.sim.gear, 3);
+  assert.equal(r.of('overrev').length, 0);
+  assert.ok(!r.sim.blown && !stalled(r));
+});

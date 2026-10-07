@@ -30,7 +30,7 @@ export const GARAGE = Object.freeze([
     name: 'Supercharged 6.2 V8',
     blurb: 'Crossplane V8 with a positive-displacement blower. Instant shove, constant whine.',
     tags: ['V8', 'Supercharged'],
-    settings: build({ preset: 'v8-cross', cylinders: 8, displacementL: 6.2, redlineRpm: 6500, idleRpm: 750, boreStroke: 1.12, induction: 'supercharger', boostBar: 0.75 }),
+    settings: build({ preset: 'v8-cross', cylinders: 8, displacementL: 6.2, redlineRpm: 6500, idleRpm: 750, boreStroke: 1.12, induction: 'supercharger', boostBar: 0.55 }),
   },
   {
     id: 'flatplane-45',
@@ -44,14 +44,14 @@ export const GARAGE = Object.freeze([
     name: 'Twin-turbo flat-plane 3.9',
     blurb: 'Hot-vee flat-plane V8 with a turbo per bank. A wall of mid-range.',
     tags: ['V8', 'Twin-turbo'],
-    settings: build({ preset: 'v8-flat', cylinders: 8, displacementL: 3.9, redlineRpm: 8000, idleRpm: 850, boreStroke: 1.1, induction: 'twin-turbo', boostBar: 0.95 }),
+    settings: build({ preset: 'v8-flat', cylinders: 8, displacementL: 3.9, redlineRpm: 8000, idleRpm: 850, boreStroke: 1.1, induction: 'twin-turbo', boostBar: 0.85 }),
   },
   {
     id: 'rally-boxer',
     name: 'Turbo boxer-4 2.5',
     blurb: 'Rally-bred flat-four on one big turbo. Off-beat rumble, then a rush of boost.',
     tags: ['Boxer', 'Turbo'],
-    settings: build({ preset: 'boxer', cylinders: 4, displacementL: 2.5, redlineRpm: 7000, idleRpm: 850, boreStroke: 1.1, induction: 'turbo', boostBar: 0.9 }),
+    settings: build({ preset: 'boxer', cylinders: 4, displacementL: 2.5, redlineRpm: 7000, idleRpm: 850, boreStroke: 1.1, induction: 'turbo', boostBar: 0.65 }),
   },
   {
     id: 'flat6-9k',
@@ -86,7 +86,7 @@ export const GARAGE = Object.freeze([
     name: 'Twin-turbo 2-rotor 1.3',
     blurb: 'Sequential-style twin-turbo rotary. Smooth, buzzy and eager to rev.',
     tags: ['Rotary', 'Twin-turbo'],
-    settings: build({ preset: 'rotary', cylinders: 2, displacementL: 1.3, redlineRpm: 8500, idleRpm: 850, induction: 'twin-turbo', boostBar: 0.7 }),
+    settings: build({ preset: 'rotary', cylinders: 2, displacementL: 1.3, redlineRpm: 8500, idleRpm: 850, induction: 'twin-turbo', boostBar: 0.5 }),
   },
   {
     id: 'vvl-i4',

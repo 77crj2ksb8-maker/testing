@@ -176,7 +176,9 @@ export class Gearbox {
     const kmh = sim.speedKmh;
     if (gear === 'R' && kmh > REVERSE_MAX_KMH) return 'Stop the car before selecting reverse';
     if (typeof gear === 'number' && sim.v < -REVERSE_MAX_KMH / 3.6) return 'Stop the car before selecting a forward gear';
-    if (typeof gear === 'number' && seqIndex(gear) < seqIndex(sim.gear)) {
+    // A downshift, or picking a gear while rolling in neutral, must not drag
+    // the engine past redline. (Upshifts only ever lower the revs.)
+    if (typeof gear === 'number' && !(typeof sim.gear === 'number' && gear > sim.gear)) {
       const rpm = this.rpmIn(gear);
       const limit = sim.profile.redlineRpm - DOWNSHIFT_MARGIN_RPM;
       if (rpm > limit) {

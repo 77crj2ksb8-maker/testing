@@ -79,11 +79,13 @@ export class Drivetrain {
     if (!profile.vvlRpm) this.vvlActive = false;
     if (this.running) this.omega = Math.max(this.omega, profile.idleRpm * RPM_TO_RAD * 0.9);
     this.locked = false;
+    this.overrevGrace = true;
   }
 
   setDrive(drive) {
     this.drive = drive;
     this.locked = false;
+    this.overrevGrace = true;
   }
 
   reset() {
@@ -144,6 +146,10 @@ export class Drivetrain {
     this.lastBackfire = -1;
     this.lastTwoStep = -1;
     this.lastTc = -1;
+    // Set when the settings change the redline or gearing under a running
+    // car: no over-rev damage until the revs are back under the new redline,
+    // so moving a slider never wrecks the engine.
+    this.overrevGrace = false;
   }
 
   /**
@@ -481,7 +487,8 @@ export class Drivetrain {
     ti.running = this.running;
     ti.powerFrac = (combustion * this.omega) / this.ratedW;
     ti.load = combustion / p.peakTorqueNm;
-    ti.rpm = now;
+    if (this.overrevGrace && now < p.redlineRpm) this.overrevGrace = false;
+    ti.rpm = this.overrevGrace ? Math.min(now, p.redlineRpm) : now;
     ti.redlineRpm = p.redlineRpm;
     ti.kmh = kmh;
     ti.boostBar = this.boostBar;
@@ -490,7 +497,7 @@ export class Drivetrain {
     if (!this.blown) {
       if (flags & 1) this.events.push({ type: 'overheat', coolantC: th.coolantC });
       if (flags & 2) this.events.push({ type: 'overrev', rpm: now, severity: overrevSeverity(now, p.redlineRpm) });
-      if (th.damage >= 1 || overrevSeverity(now, p.redlineRpm) >= 1) this.blowUp(th.damage >= 1 ? th.cause : 'over-rev');
+      if (th.damage >= 1 || overrevSeverity(ti.rpm, p.redlineRpm) >= 1) this.blowUp(th.damage >= 1 ? th.cause : 'over-rev');
     }
     this.coolantC = th.coolantC;
     this.oilC = th.oilC;
@@ -520,7 +527,10 @@ export class Drivetrain {
     this.running = false;
     this.cranking = false;
     this.fuelCut = false;
-    this.vvlActive = false;
+    if (this.vvlActive) {
+      this.vvlActive = false;
+      this.events.push({ type: 'vvl', on: false });
+    }
     this.events.push({ type: 'blown', cause });
   }
 

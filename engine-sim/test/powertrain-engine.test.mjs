@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Induction, steadyBoostBar, BOV_MIN_BAR } from '../src/induction.js';
-import { Thermal, COOLANT_WARN_C } from '../src/thermal.js';
+import { Thermal, COOLANT_WARN_C, COOLANT_BOIL_C } from '../src/thermal.js';
+import { buildProfile } from '../src/config.js';
 import { rig, rpmOf } from './powertrain-rig.mjs';
 
 const H = 0.002;
@@ -27,6 +28,12 @@ test('a closed throttle pulls manifold vacuum on every engine', () => {
   r.run(2);
   assert.ok(r.sim.boostBar < -0.4, `idle manifold ${r.sim.boostBar}`);
   assert.equal(r.sim.inductionKind, 'na');
+  // A stopped engine pumps nothing: the manifold returns to atmospheric.
+  r.sim.running = false;
+  r.sim.omega = 0;
+  r.run(3);
+  assert.ok(r.sim.rpm < 1, `engine stopped (${r.sim.rpm})`);
+  assert.ok(Math.abs(r.sim.boostBar) < 0.02, `manifold with the engine off ${r.sim.boostBar}`);
 });
 
 test('turbo: spool lag, then the wastegate holds the target', () => {
@@ -159,8 +166,10 @@ test('an engine cooked long enough blows with cause overheat', () => {
   assert.equal(th.cause, 'overheat');
 
   const r = rig();
-  r.sim.thermal.coolantC = 150;
-  r.run(30, { gas: 1 });
+  r.sim.thermal.coolantC = COOLANT_BOIL_C;
+  let hottest = 0;
+  r.run(40, { gas: 1 }, (sim) => (hottest = Math.max(hottest, sim.coolantC)));
+  assert.ok(hottest <= COOLANT_BOIL_C, `coolant tops out at boiling (${hottest})`);
   const blown = r.of('blown');
   assert.equal(blown.length, 1);
   assert.equal(blown[0].cause, 'overheat');
@@ -254,4 +263,43 @@ test('damage costs power and roughens the idle', () => {
     return peak;
   };
   assert.ok(torqueAt(0.6) < torqueAt(0) * 0.85);
+});
+
+test('coolant tops out at its boiling point under sustained abuse', () => {
+  const abuse = rig();
+  let hottest = 0;
+  abuse.run(240, { gas: 1 }, (sim) => (hottest = Math.max(hottest, sim.coolantC)));
+  assert.ok(hottest <= COOLANT_BOIL_C && hottest > COOLANT_WARN_C, `hottest ${hottest}`);
+  assert.ok(abuse.sim.damage > 0, 'boiling still hurts the engine');
+});
+
+test('lowering the redline under a revving engine does not wreck it', () => {
+  const r = rig({ preset: 'v8-flat', cylinders: 8, redlineRpm: 9000 });
+  r.launch(1, 1.2);
+  r.run(0.15, { clutch: 1 });
+  r.box.request(2);
+  r.run(0.4, (t) => ({ gas: 1, clutch: Math.max(0, 1 - t / 0.25) }));
+  for (let i = 0; i < 1200 && r.sim.rpm < 7500; i++) r.run(1 / 120, { gas: 1 });
+  assert.ok(r.sim.rpm > 7500 && r.sim.gear === 2, `revving ${r.sim.rpm}`);
+  // The driver drags the redline slider down to 5,500 while holding 2nd.
+  const low = buildProfile({ ...r.settings, redlineRpm: 5500 });
+  r.sim.setProfile(low);
+  r.sim.profile = low;
+  r.run(0.5, { gas: 1 });
+  assert.equal(r.sim.blown, false);
+  assert.equal(r.sim.damage, 0);
+  assert.equal(r.of('overrev').length, 0);
+  // Back under the new redline the protection ends: a later over-rev counts again.
+  r.run(4, { brake: 1, clutch: 1 });
+  assert.equal(r.sim.overrevGrace, false);
+});
+
+test('a blow-up with the high cam engaged reports the cam dropping out', () => {
+  const r = rig({ preset: 'i4', cylinders: 4, redlineRpm: 8500, vvlRpm: 5500 });
+  r.run(1.5, { gas: 1 });
+  assert.equal(r.sim.vvlActive, true);
+  r.sim.blowUp('over-rev');
+  const evs = r.sim.drainEvents().map((e) => e.type + (e.type === 'vvl' ? `:${e.on}` : ''));
+  assert.deepEqual(evs.slice(-2), ['vvl:false', 'blown']);
+  assert.equal(r.sim.vvlActive, false);
 });
