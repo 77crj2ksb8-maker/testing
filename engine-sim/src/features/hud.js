@@ -14,6 +14,7 @@ const mod = (a, n) => ((a % n) + n) % n;
 
 const RAIL_BTN = 44; // px, matches .tool-rail .tool-btn
 const RAIL_GAP = 8;
+const TOAST_SLOT = 64; // px kept clear under the toast's top edge (two lines)
 
 const ICONS = {
   camera: '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 8.5h3.2l1.8-3h8l1.8 3H21V19H3z"/><circle cx="12" cy="13.5" r="3.4"/></svg>',
@@ -212,20 +213,31 @@ export default {
       const count = rail.children.length;
       const cols = Math.max(1, Math.ceil(count / rows));
       rail.style.top = `${Math.round(top)}px`;
+      // Portrait: a vertical rail. Landscape: rows under the top-right buttons.
+      rail.classList.toggle('is-rows', landscape);
       root.setProperty('--rail-rows', String(Math.min(rows, Math.max(1, count))));
+      root.setProperty('--rail-cols', String(cols));
       const railW = cols * RAIL_BTN + (cols - 1) * RAIL_GAP;
       root.setProperty('--rail-w', `${railW}px`);
 
-      // Toast: centred under the tach in portrait, in the top centre gap in landscape.
+      // Toast: centred under the tach in portrait, in the top centre gap in
+      // landscape. The stall card starts below a two-line toast's slot.
+      let toastTop;
       if (landscape) {
         const cx = w / 2;
         const half = Math.min(cx - tachRect.right, right.left - cx) - 12;
-        root.setProperty('--toast-top', `${Math.round(tachRect.top)}px`);
+        toastTop = tachRect.top;
         root.setProperty('--toast-max', `${Math.max(200, Math.round(half * 2))}px`);
       } else {
-        root.setProperty('--toast-top', `${Math.round(Math.max(tachRect.bottom, right.bottom) + 8)}px`);
+        toastTop = tachRect.bottom + 8;
         root.setProperty('--toast-max', `${Math.round(w - 2 * (14 + railW + 8))}px`);
       }
+      root.setProperty('--toast-top', `${Math.round(toastTop)}px`);
+      // Landscape: centred in the free middle column. Portrait: kept clear of the lever and pedals.
+      const stallTop = landscape
+        ? Math.max(toastTop + TOAST_SLOT, h / 2 - 95)
+        : Math.min(toastTop + TOAST_SLOT, Math.min(lever.top, pedals.top) - 210);
+      root.setProperty('--stall-top', `${Math.round(stallTop)}px`);
     }
 
     // ── Bus wiring ──────────────────────────────────────────────────────────

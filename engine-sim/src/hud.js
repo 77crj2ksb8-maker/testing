@@ -77,6 +77,9 @@ export const dialMaxRpm = (redlineRpm) => Math.ceil((redlineRpm * 1.08) / 1000) 
 /** Needle angle (radians, canvas convention) for an rpm. */
 export const dialAngle = (rpm, maxRpm) => DIAL_START + DIAL_SWEEP * clamp(rpm / maxRpm, 0, 1);
 
+/** px under the gear readout for the speed line and status tag. */
+const DIAL_TEXT = 34;
+
 /** Crank degrees in one full cycle: 720 for four-strokes, 1080 for a rotary (rotor turns once). */
 export const scrubPeriod = (profile) => (profile.kind === 'rotary' ? 1080 : 720);
 
@@ -237,10 +240,11 @@ export class AnalogTach {
     };
   }
 
+  // Gear, speed and the status tag stack under the hub, inside the open
+  // bottom of the 240° sweep, so the canvas is r + 0.42 r + DIAL_TEXT tall.
   geometry() {
     const pad = 3;
-    // The 240° sweep reaches down to sin(30°) = 0.5 r below the centre; leave room for the status tag.
-    const r = Math.min(this.w / 2 - pad, (this.h - pad - 10) / 1.5);
+    const r = Math.max(20, Math.min(this.w / 2 - pad, (this.h - pad - DIAL_TEXT) / 1.42));
     return { cx: this.w / 2, cy: pad + r, r };
   }
 
@@ -294,9 +298,11 @@ export class AnalogTach {
         ctx.fillText(String(rpm / 1000), cx + c * rn, cy + s * rn);
       }
     }
-    ctx.font = `500 9px ${t.data}`;
-    ctx.fillStyle = t.faint;
-    ctx.fillText('×1000 rpm', cx, cy - r * 0.36);
+    if (big) {
+      ctx.font = `500 9px ${t.data}`;
+      ctx.fillStyle = t.faint;
+      ctx.fillText('×1000 rpm', cx, cy - r * 0.34);
+    }
     this.redline = redlineRpm;
     this.max = max;
     this.faceDirty = false;
@@ -359,9 +365,9 @@ export class AnalogTach {
     ctx.lineWidth = 2;
     ctx.stroke();
 
-    // Gear and speed in the lower half, where the needle rarely sits.
+    // Gear and speed under the hub, where the needle never sits.
     const big = r > 64;
-    const gy = cy + r * 0.4;
+    const gy = cy + r * 0.42;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'alphabetic';
     ctx.font = `800 ${big ? 30 : 24}px ${t.display}`;
@@ -387,7 +393,7 @@ export class AnalogTach {
       ctx.textAlign = 'center';
       ctx.font = `500 9px ${t.data}`;
       ctx.fillStyle = flags & 1 ? t.red : flags & 2 ? t.amber : t.muted;
-      ctx.fillText(tag, cx, Math.min(this.h - 2, sy + 12));
+      ctx.fillText(tag, cx, sy + 13);
     }
     return true;
   }

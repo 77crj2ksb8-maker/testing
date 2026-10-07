@@ -145,8 +145,7 @@ export class SettingsPanel {
     for (const chip of this.navChips) {
       chip.addEventListener('click', () => {
         const target = $(chip.dataset.target);
-        const top = this.backdrop.querySelector('.sheet-top');
-        if (target) this.sheet.scrollTo({ top: target.offsetTop - (top?.offsetHeight ?? 0) - 6, behavior: 'smooth' });
+        if (target) this.sheet.scrollTo({ top: this.sectionTop(target) - 8, behavior: 'smooth' });
       });
     }
     this.sheet.addEventListener('scroll', () => this.markSection(), { passive: true });
@@ -186,12 +185,20 @@ export class SettingsPanel {
     if (this.dragging !== input) $(outId).textContent = text;
   }
 
+  /** Scroll offset that puts a section just under the sticky sheet header. */
+  sectionTop(section) {
+    const header = this.backdrop.querySelector('.sheet-top');
+    const sheetTop = this.sheet.getBoundingClientRect().top;
+    return section.getBoundingClientRect().top - sheetTop + this.sheet.scrollTop - (header?.offsetHeight ?? 0);
+  }
+
   markSection() {
-    const y = this.sheet.scrollTop + (this.backdrop.querySelector('.sheet-top')?.offsetHeight ?? 0) + 24;
+    if (this.backdrop.hidden) return;
+    const atEnd = this.sheet.scrollTop + this.sheet.clientHeight >= this.sheet.scrollHeight - 4;
     let active = this.navChips[0];
     for (const chip of this.navChips) {
       const sec = $(chip.dataset.target);
-      if (sec && sec.offsetTop <= y) active = chip;
+      if (sec && (atEnd || this.sectionTop(sec) <= this.sheet.scrollTop + 40)) active = chip;
     }
     if (active === this.activeChip) return;
     this.activeChip = active;
