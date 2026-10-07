@@ -155,6 +155,13 @@ test('cooldowns space out repeated triggers per key', () => {
   assert.ok(!c.allow('bov', 1.1, 0.25));
   assert.ok(c.allow('twostep', 1.1, 0.25), 'keys are independent');
   assert.ok(c.allow('bov', 1.3, 0.25));
+  // recent(): did this key just fire? (merges a backfire into the two-step bang it belongs to)
+  assert.ok(c.recent('bov', 1.3, 0.05));
+  assert.ok(c.recent('bov', 1.34, 0.05));
+  assert.ok(!c.recent('bov', 1.36, 0.05), 'too long ago');
+  assert.ok(!c.recent('pop', 1.3, 0.05), 'never fired');
+  assert.ok(!c.recent('bov', 1.2, 0.05), 'a clock from before the trigger (new context) is not recent');
+  assert.ok(!c.allow('bov', 1.36, 0.25) && c.recent('bov', 1.34, 0.05), 'a refused trigger does not move the timestamp');
 });
 
 test('backfire plans: crackle volleys grow with strength, two-step is a bang', () => {

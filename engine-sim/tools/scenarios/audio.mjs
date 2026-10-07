@@ -133,6 +133,17 @@ export default async function audio({ page, evaluate, advance, shot, expect, log
   const drained = await evaluate(() => window.__app.audio.voiceStats());
   expect(drained.active === 0 && drained.live === 0, `pop voices are released when they end (active ${drained.active}, live ${drained.live})`);
 
+  // A two-step cut sends 'twostep' and a 'twostep' backfire in the same tick:
+  // one bang, not two 30 ms apart.
+  const twoStep = await evaluate(() => {
+    const a = window.__app;
+    a.bus.emit('twostep', {});
+    a.bus.emit('backfire', { strength: 0.9, source: 'twostep' });
+    return a.audio.voiceStats().live;
+  });
+  expect(twoStep === 1, `a two-step cut plays one bang, not a flam (${twoStep} voices)`);
+  await settle(0.5);
+
   // Every backfire source and the two-step.
   await evaluate(() => {
     const b = window.__app.bus;
@@ -217,6 +228,22 @@ export default async function audio({ page, evaluate, advance, shot, expect, log
   await settle(0.5, 10);
   const repaired = await listen(500);
   expect(repaired.rms > 0.01, `sound returns after repair (${fmt(repaired)})`);
+
+  // A simulator that blew up and is healthy again brings the sound back even
+  // if no 'repair' event arrives.
+  await force({ blown: true });
+  await evaluate(() => window.__app.bus.emit('blown', { cause: 'over-rev' }));
+  await settle(0.3, 3);
+  const deadAgain = await evaluate(() => window.__app.audio.dead);
+  await force({ blown: false });
+  await settle(0.5, 10);
+  // The failure's hiss is still fading, so look at the engine voice itself.
+  const revived = await evaluate(() => {
+    const a = window.__app.audio;
+    return { dead: a.dead, level: a.banks[0].level.gain.value };
+  });
+  expect(deadAgain && !revived.dead && revived.level > 0.1,
+    `the engine voice follows the simulator back from blown without a repair event (level ${revived.level.toFixed(2)})`);
 
   // Mute fades out and suspends the context; unmute resumes.
   await evaluate(() => window.__app.actions.setMuted(true));

@@ -96,6 +96,12 @@ export class Cooldowns {
     this.last.set(key, now);
     return true;
   }
+
+  /** True when `key` was last allowed less than `gap` ago. */
+  recent(key, now, gap) {
+    const t = this.last.get(key);
+    return t !== undefined && now >= t && now - t < gap;
+  }
 }
 
 /**

@@ -34,6 +34,8 @@ class Glide {
   }
 
   to(value, t, tc) {
+    // A non-finite target would make setTargetAtTime throw on every frame.
+    if (!Number.isFinite(value)) return;
     if (Math.abs(value - this.last) <= 1e-4 + Math.abs(value) * 1e-3) return;
     this.last = value;
     this.param.setTargetAtTime(value, t, tc);
@@ -59,6 +61,7 @@ export class EngineAudio {
     this.rand = mulberry32(0x5eed);
     this.live = new Set(); // one-shot sources started and neither ended nor stolen
     this.dead = false; // blown engine: silent until repair
+    this.simBlown = false; // the simulator itself reported blown while dead
     this.vvlOn = false;
     this.load = 0;
     this.vvlMix = 0;
@@ -157,6 +160,9 @@ export class EngineAudio {
 
   build() {
     const ctx = this.ctx;
+    // Nodes from any previous context are gone: setProfile() must rebuild the voice.
+    this.waveKey = '';
+    this.banks = [];
     const gain = (v = 1) => {
       const g = ctx.createGain();
       g.gain.value = v;
@@ -496,6 +502,10 @@ export class EngineAudio {
     const p = sim.profile || this.profile;
     this.pool.prune(t);
 
+    // Silent until repair, however the simulator gets repaired: the 'repair'
+    // event, or a blown simulator that is healthy again.
+    if (sim.blown) this.simBlown = true;
+    else if (this.dead && this.simBlown) this.repair();
     const dead = this.dead || !!sim.blown;
     const rpm = Math.max(0, sim.rpm);
     const rpmN = clamp(rpm / p.redlineRpm, 0, 1.15);
@@ -634,7 +644,11 @@ export class EngineAudio {
   /** Exhaust pops and bangs: payload of the 'backfire' event. */
   backfire({ strength = 0.5, source = 'overrun' } = {}) {
     if (this.dead || !this.running) return;
+    // A two-step cut sends 'twostep' and then this backfire in the same tick:
+    // the event already fired the bang, and a second copy 30 ms later would flam.
+    const banged = source === 'twostep' && this.cooldowns.recent('twostep', this.ctx.currentTime, 0.05);
     for (const v of backfirePlan(strength, source, this.rand)) {
+      if (banged && v.kind === 'bang') continue;
       this.play(v.kind, { delay: v.delay, gain: v.gain * 0.85, rate: v.rate, priority: source === 'overrun' ? PRIORITY.pop : PRIORITY.event });
     }
   }
@@ -688,6 +702,7 @@ export class EngineAudio {
 
   repair() {
     this.dead = false;
+    this.simBlown = false;
     this.vvlOn = false;
   }
 
