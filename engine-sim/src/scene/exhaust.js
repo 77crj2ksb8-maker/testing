@@ -150,7 +150,8 @@ export class ExhaustSystem {
     const M = this.M;
     const heat = egtHeat(egtC);
     heatColor(heat, this.heat);
-    const k = 1.4 + 2.2 * heat;
+    // Dull red at a warm idle, orange under load; only the hottest end blooms.
+    const k = 0.12 + 0.7 * heat;
     M.header.emissive.setRGB(this.heat[0] * k, this.heat[1] * k, this.heat[2] * k);
     M.turbine.emissive.copy(M.header.emissive);
     const kp = 0.35;

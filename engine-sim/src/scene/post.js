@@ -37,7 +37,7 @@ export class PostFX {
     this.bloomComposer = new EffectComposer(r, new THREE.WebGLRenderTarget(1, 1, { type: THREE.HalfFloatType }));
     this.bloomComposer.renderToScreen = false;
     this.bloomComposer.addPass(new RenderPass(this.scene, this.camera));
-    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.6, 0.25, 0.18);
+    this.bloom = new UnrealBloomPass(new THREE.Vector2(1, 1), 0.5, 0.2, 0.3);
     this.bloomComposer.addPass(this.bloom);
 
     // Linear HDR target with MSAA so edges stay as clean as the direct path.

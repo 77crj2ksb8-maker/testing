@@ -99,7 +99,7 @@ export class CameraRig {
   /** Temporarily offset the camera for shake; call endShake() after rendering. */
   beginShake(scale) {
     if (!this.shakeAmp) return false;
-    const a = this.shakeAmp * this.shakeAmp * scale;
+    const a = this.shakeAmp * scale;
     const t = this.shakeTime;
     this.shakeOffset.set(shakeNoise(t, 1) * a, shakeNoise(t, 2) * a, shakeNoise(t, 3) * a * 0.6);
     this.camera.position.add(this.shakeOffset);

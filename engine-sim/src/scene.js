@@ -647,7 +647,8 @@ export class EngineView {
     if (p.kind === 'rotary') {
       const { R, e } = this.geom;
       const flow = this.flow ?? (this.flow = [0, 0]);
-      this.rotors.forEach((k, i) => {
+      for (let i = 0; i < this.rotors.length; i++) {
+        const k = this.rotors[i];
         const pose = rotorPose(crankDeg, k.phase, R, e);
         k.rotor.position.x = pose.center[0];
         k.rotor.position.y = pose.center[1];
@@ -670,7 +671,7 @@ export class EngineView {
           strokes.push(since < 270 ? 0 : 1);
           labelPts.push(this.engine.localToWorld(k.label.set(-(R + 0.75), 0.2, k.z)));
         }
-      });
+      }
       this.glows.instanceMatrix.needsUpdate = true;
       this.glows.instanceColor.needsUpdate = true;
       this.portMarks.instanceColor.needsUpdate = true;
