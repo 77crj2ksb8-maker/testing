@@ -123,7 +123,6 @@ export default async function hud({ page, evaluate, advance, shot, expect, tap, 
     a.hud.update = () => {};
   }, rpm);
   const release = () => evaluate(() => delete window.__app.hud.update);
-  await page.addStyleTag({ content: '.led { transition: none !important; }' });
   await pose(shiftAt - 700);
   await shot('hud-shift-lights-climb');
   await page.emulateMedia({ reducedMotion: 'reduce' });

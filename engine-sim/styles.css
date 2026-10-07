@@ -16,6 +16,7 @@
   --throttle-glow: rgba(255, 122, 26, 0.55);
   --clutch: #2f6bff;
   --clutch-glow: rgba(47, 107, 255, 0.55);
+  --shift-blue: #3d8bff; /* shift-light flash: brighter than the clutch blue so it reads as a signal */
   --brake: #e2e6ec;
   --red: #ff3b3b;
   --amber: #ffb020;
@@ -107,12 +108,11 @@ output { font-variant-numeric: tabular-nums; }
   height: 6px;
   border-radius: 3px;
   background: #1f252f;
-  transition: background-color 60ms, box-shadow 60ms;
 }
 .led:nth-child(n + 5) { --on: var(--amber); }
 .led:nth-child(n + 8) { --on: var(--red); }
 .led.is-on { background: var(--on); box-shadow: 0 0 6px var(--on); }
-.shift-lights.is-flash .led { --on: #3d8bff; animation: led-flash 140ms steps(1, end) infinite alternate; }
+.shift-lights.is-flash .led { --on: var(--shift-blue); animation: led-flash 140ms steps(1, end) infinite alternate; }
 @keyframes led-flash {
   from { background: var(--on); box-shadow: 0 0 9px var(--on); }
   to { background: #1f252f; box-shadow: none; }
@@ -885,7 +885,7 @@ output { font-variant-numeric: tabular-nums; }
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .pedal, .toast, .rpm-fill, .led, .switch, .switch::after, .paddle, .garage-card, .pill-assist { transition: none; }
+  .pedal, .toast, .rpm-fill, .switch, .switch::after, .paddle, .garage-card, .pill-assist { transition: none; }
   .shifter.is-blocked .knob { animation: none; }
   /* Shift point: steady blue instead of a strobe. */
   .shift-lights.is-flash .led { animation: none; background: var(--on); box-shadow: 0 0 9px var(--on); }
