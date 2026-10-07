@@ -20,7 +20,7 @@ import { planExhaust, ExhaustSystem } from './scene/exhaust.js';
 import { Induction } from './scene/induction3d.js';
 import { Effects } from './scene/effects.js';
 import { CameraRig, CAMERA_PRESETS } from './scene/camera.js';
-import { PostFX } from './scene/post.js';
+import { PostFX, markBloom } from './scene/post.js';
 import { StrokeLabels } from './scene/labels.js';
 import { initialQuality, adaptQuality, QUALITY_WINDOW } from './scene/quality.js';
 import { strokeIndex, rotaryPortFlow } from './scene/timing.js';
@@ -105,6 +105,7 @@ export class EngineView {
     this.scene.add(this.floor);
 
     this.effects = new Effects(this.scene);
+    markBloom(this.effects.sparks.points);
     this.rig = new CameraRig(this.camera, this.controls);
     this.post = new PostFX(this.renderer, this.scene, this.camera);
     this.labels = new StrokeLabels(canvas);
@@ -182,6 +183,12 @@ export class EngineView {
 
     this.applyDisplay();
     this.applyExplode(this.explodeT);
+    // What glows in the bloom pass.
+    for (const o of [this.glows, this.gases?.mesh, this.sparks.pts, this.portMarks, this.breachGlow, this.exhaust.pipes, this.exhaust.flames]) {
+      if (o) markBloom(o);
+    }
+    for (const g of this.exhaust.groups) markBloom(g.headers);
+    for (const t of this.inductionHw.glowing) markBloom(t);
     this.root.updateMatrixWorld(true);
     this.frameModel(true);
     if (wasBlown) this.blowUp({ instant: true });
@@ -792,23 +799,24 @@ export class EngineView {
     } else if (id === 'side') {
       target = sphere.center.clone();
       dir = v3(1, 0.16, -0.04);
-      k = 1.02;
+      k = this.fitAll() / dist;
     } else if (id === 'top') {
       target = sphere.center.clone();
       dir = v3(0.04, 1, 0.3);
-      k = 1.0;
+      k = (this.fitAll() / dist) * 0.92;
     } else if (id === 'valvetrain') {
       const bank = this.banks?.[0];
       if (bank) {
         const zs = bank.cyls.map((c) => c.z);
-        target = bank.headGroup.localToWorld(v3(0, this.geom.H.camY, Math.max(...zs)));
+        // Front half of the first bank's head, seen from above its exhaust side.
+        target = bank.headGroup.localToWorld(v3(0, this.geom.H.camY, (Math.max(...zs) * 2 + bank.zc) / 3));
         const axis = v3(Math.sin(bank.bankDeg * DEG), Math.cos(bank.bankDeg * DEG), 0);
-        dir = axis.multiplyScalar(0.8).add(v3(0.25, 0.35, 0.95));
+        dir = axis.multiplyScalar(0.9).add(v3(0.2, 0.3, 0.75));
       } else {
         target = v3(0, 0, this.geom.front);
         dir = v3(0.5, 0.35, 1);
       }
-      k = 0.42;
+      k = 0.52;
     } else if (id === 'gearbox') {
       target = this.gbx.localToWorld(this.gearboxCenter.clone());
       dir = v3(-0.9, 0.5, -0.5);
@@ -820,6 +828,15 @@ export class EngineView {
     }
     const position = target.clone().addScaledVector(dir.normalize(), dist * k);
     return { target, position, dist };
+  }
+
+  // Distance that fits the whole assembly across the narrower screen axis.
+  fitAll() {
+    const { sphere } = this.frameInfo();
+    const vFov = this.camera.fov * DEG;
+    const hFov = 2 * Math.atan(Math.tan(vFov / 2) * this.camera.aspect);
+    const usable = Math.max(0.35, 1 - (this.insets.top + this.insets.bottom) / Math.max(1, this.height));
+    return (sphere.radius * 0.92) / Math.sin(Math.min(vFov * usable, hFov) / 2);
   }
 
   frameModel(resetView) {
@@ -1181,6 +1198,9 @@ export class EngineView {
     if (mat.transparent === opaque) {
       mat.transparent = !opaque;
       mat.depthWrite = opaque;
+      // Solid housings show cut faces in the section colour.
+      if (opaque) mat.defines = { ...mat.defines, SECTION_FACES: '' };
+      else if (mat.defines) delete mat.defines.SECTION_FACES;
       mat.needsUpdate = true;
     }
     mat.color.set(look.color);

@@ -24,6 +24,7 @@ const CSS = `
 .stroke-chip[data-s="power"] { border-color: rgba(255, 122, 26, 0.55); }
 `;
 
+const CHIP_H = 21; // chip height + gap, px
 const SHORT = { power: 'Power', exhaust: 'Exhaust', intake: 'Intake', compression: 'Compress' };
 
 export class StrokeLabels {
@@ -44,7 +45,7 @@ export class StrokeLabels {
       const word = el('span');
       const node = el('div', { class: 'stroke-chip' }, el('b', { text: String(num) }), dot, word);
       this.layer.append(node);
-      return { node, word, stroke: -1, x: NaN, y: NaN };
+      return { node, word, stroke: -1, x: NaN, y: NaN, tx: 0, ty: 0, w: 0, front: true };
     });
   }
 
@@ -58,7 +59,8 @@ export class StrokeLabels {
    */
   update(camera, points, strokes, width, height, insets) {
     if (this.layer.hidden) this.layer.hidden = false;
-    for (let i = 0; i < this.chips.length; i++) {
+    const n = this.chips.length;
+    for (let i = 0; i < n; i++) {
       const c = this.chips[i];
       const s = strokes[i];
       if (s !== c.stroke) {
@@ -66,19 +68,47 @@ export class StrokeLabels {
         const id = STROKES[s].id;
         c.node.dataset.s = id;
         c.word.textContent = SHORT[id];
+        c.w = 0;
       }
       this.v.copy(points[i]).project(camera);
-      const x = Math.round(((this.v.x + 1) / 2) * width);
-      const y = Math.round(((1 - this.v.y) / 2) * height);
+      c.tx = ((this.v.x + 1) / 2) * width;
+      c.ty = ((1 - this.v.y) / 2) * height;
+      c.front = this.v.z <= 1;
+    }
+    // Greedy de-overlap: walk the chips top to bottom and push each one down
+    // until it clears the chips already placed.
+    const order = this.order ?? (this.order = []);
+    order.length = 0;
+    for (let i = 0; i < n; i++) order.push(i);
+    order.sort((a, b) => this.chips[a].ty - this.chips[b].ty);
+    for (let k = 0; k < n; k++) {
+      const c = this.chips[order[k]];
+      if (!c.w) c.w = c.node.offsetWidth || 72; // measured once per text change
+      let moved = true;
+      for (let guard = 0; moved && guard < n; guard++) {
+        moved = false;
+        for (let j = 0; j < k; j++) {
+          const o = this.chips[order[j]];
+          if (Math.abs(o.ty - c.ty) < CHIP_H && Math.abs(o.tx - c.tx) < (o.w + c.w) / 2 + 4) {
+            c.ty = o.ty + CHIP_H;
+            moved = true;
+          }
+        }
+      }
+    }
+    for (let i = 0; i < n; i++) {
+      const c = this.chips[i];
+      const x = Math.round(c.tx);
+      const y = Math.round(c.ty);
       // Never draw over the HUD bars or off the edges.
-      const behind = this.v.z > 1 || y < insets.top + 10 || y > height - insets.bottom - 10 || x < 40 || x > width - 40;
+      const off = !c.front || y < insets.top + 10 || y > height - insets.bottom - 10 || x < c.w / 2 + 4 || x > width - c.w / 2 - 4;
       if (x !== c.x || y !== c.y) {
         c.x = x;
         c.y = y;
         c.node.style.transform = `translate(${x}px, ${y}px) translate(-50%, -50%)`;
       }
-      const hidden = behind ? '0' : '';
-      if (c.node.style.opacity !== hidden) c.node.style.opacity = hidden;
+      const opacity = off ? '0' : '';
+      if (c.node.style.opacity !== opacity) c.node.style.opacity = opacity;
     }
   }
 }

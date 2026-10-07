@@ -3,6 +3,21 @@
 
 import * as THREE from 'three';
 
+// Housings show their inside faces in a flat section colour while cut away,
+// which reads as a solid cut surface without building caps.
+function withSectionFaces(mat) {
+  mat.onBeforeCompile = (shader) => {
+    shader.fragmentShader = shader.fragmentShader.replace(
+      '#include <dithering_fragment>',
+      `#include <dithering_fragment>
+      #ifdef SECTION_FACES
+        if (!gl_FrontFacing) gl_FragColor = vec4(0.36, 0.15, 0.07, 1.0);
+      #endif`,
+    );
+  };
+  return mat;
+}
+
 export function makeMaterials() {
   const flashBase = new THREE.MeshBasicMaterial({
     color: 0xff5a14, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false,
@@ -13,14 +28,14 @@ export function makeMaterials() {
     darkSteel: new THREE.MeshStandardMaterial({ color: 0x40464f, metalness: 0.85, roughness: 0.42 }),
     rod: new THREE.MeshStandardMaterial({ color: 0xc6ccd4, metalness: 1, roughness: 0.22 }),
     ring: new THREE.MeshStandardMaterial({ color: 0x23272d, metalness: 0.6, roughness: 0.5 }),
-    glass: new THREE.MeshPhysicalMaterial({
+    glass: withSectionFaces(new THREE.MeshPhysicalMaterial({
       color: 0x2a3a52, metalness: 0, roughness: 0.1, transparent: true, opacity: 0.16,
       depthWrite: false, side: THREE.DoubleSide, clearcoat: 1, clearcoatRoughness: 0.08,
-    }),
-    glassDark: new THREE.MeshPhysicalMaterial({
+    })),
+    glassDark: withSectionFaces(new THREE.MeshPhysicalMaterial({
       color: 0x18202c, metalness: 0.2, roughness: 0.25, transparent: true, opacity: 0.42,
       depthWrite: false, side: THREE.DoubleSide, clearcoat: 1,
-    }),
+    })),
     edge: new THREE.LineBasicMaterial({ color: 0xa9bedc, transparent: true, opacity: 0.3 }),
     friction: new THREE.MeshStandardMaterial({ color: 0xd9692a, metalness: 0.2, roughness: 0.75 }),
     gear: new THREE.MeshStandardMaterial({ color: 0x9aa3ae, metalness: 0.95, roughness: 0.3 }),

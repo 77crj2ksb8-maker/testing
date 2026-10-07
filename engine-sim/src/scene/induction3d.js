@@ -27,6 +27,7 @@ export class Induction {
     this.metal = [];
     this.housings = [];
     this.spinners = [];
+    this.glowing = []; // hot parts for the bloom pass
     this.turbos = [];
     this.starts = null;
     this.crossovers = [];
@@ -153,6 +154,7 @@ export class Induction {
       t.y += 0.15 * B;
       const turbine = new THREE.Mesh(turbineGeo, M.turbine);
       turbine.position.copy(t);
+      this.glowing.push(turbine);
       const cz = t.z + 0.8 * B;
       const core = new THREE.Mesh(coreGeo, M.blackAlloy);
       core.position.set(t.x, t.y, t.z + 0.4 * B);
