@@ -251,6 +251,46 @@ export class HShifter {
   }
 }
 
+/**
+ * Sequential paddles: one shift per press. Fires on pointerdown so a thumb can
+ * shift while another finger holds the gas (each paddle tracks its own
+ * pointer); keyboard activation (Enter/Space on a focused paddle) still works
+ * through click.
+ */
+export class Paddles {
+  constructor(up, down, { onUp, onDown }) {
+    this.buttons = [[up, onUp], [down, onDown]];
+    for (const [btn, fire] of this.buttons) {
+      let pointer = null;
+      btn.addEventListener('pointerdown', (e) => {
+        if (pointer !== null) return;
+        e.preventDefault();
+        pointer = e.pointerId;
+        btn.classList.add('is-pressed');
+        try {
+          btn.setPointerCapture(e.pointerId);
+        } catch {
+          /* pointer already gone */
+        }
+        fire();
+      });
+      const end = (e) => {
+        if (e.pointerId !== pointer) return;
+        pointer = null;
+        btn.classList.remove('is-pressed');
+      };
+      btn.addEventListener('pointerup', end);
+      btn.addEventListener('pointercancel', end);
+      btn.addEventListener('lostpointercapture', end);
+      // Pointer presses already shifted; only keyboard clicks (detail 0) get here as new presses.
+      btn.addEventListener('click', (e) => {
+        if (e.detail === 0) fire();
+      });
+      btn.addEventListener('contextmenu', (e) => e.preventDefault());
+    }
+  }
+}
+
 /** Keyboard shortcuts for desktop testing. */
 export function bindKeyboard({ gas, clutch, brake, onGear, onStart, onToggle, onShiftUp, onShiftDown, onKey }) {
   const held = new Set();
