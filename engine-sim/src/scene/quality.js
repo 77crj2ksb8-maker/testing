@@ -33,7 +33,20 @@ export function initialQuality(mode, caps = {}) {
 }
 
 /**
- * Feed one window's average frame time. Mutates `state` and returns what
+ * Typical frame time of a measurement window: the median, so a handful of
+ * hitches (shader compiles at boot, a rebuild, a tab switch) cannot read as
+ * a slow device. Sorts `samples` in place.
+ */
+export function typicalFrameMs(samples) {
+  const n = samples.length;
+  if (!n) return 0;
+  samples.sort((a, b) => a - b);
+  const m = n >> 1;
+  return n % 2 ? samples[m] : (samples[m - 1] + samples[m]) / 2;
+}
+
+/**
+ * Feed one window's typical frame time (typicalFrameMs). Mutates `state` and returns what
  * changed: 'bloom-off' | 'bloom-on' | 'resolution' | null.
  */
 export function adaptQuality(state, avgMs) {

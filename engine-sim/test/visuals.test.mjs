@@ -11,7 +11,9 @@ import {
   crankcaseCircles, circlesExtent,
 } from '../src/scene/layout.js';
 import { GARAGE, garagePatch } from '../src/presets.js';
-import { initialQuality, adaptQuality, SLOW_MS, FAST_MS } from '../src/scene/quality.js';
+import {
+  initialQuality, adaptQuality, typicalFrameMs, SLOW_MS, FAST_MS, QUALITY_WINDOW,
+} from '../src/scene/quality.js';
 import { acesFilmic, untoneMapped } from '../src/scene/tonemap.js';
 import { headDims } from '../src/scene/layout.js';
 
@@ -273,6 +275,11 @@ test('exploded view moves heads along the bank axis and the gearbox back', () =>
   assert.ok(near(out[0], 1.7) && out[1] < -0.9, `boxer headers drop (${out})`);
   explodeOffset('exhaust', -45, 1, 1, out);
   assert.ok(out[0] < -2 && out[1] > 1, `V headers move out with the head (${out})`);
+  // A rotary's housings and plates fan out along the shaft, forwards.
+  explodeOffset('stack', 0, 1, 1, out);
+  assert.ok(out[2] > 0.3 && out[0] === 0 && out[1] === 0, `rotary stack slides along the shaft (${out})`);
+  explodeOffset('stack', 0, 0.5, 1, out);
+  assert.ok(near(out[2], 0.5 * explodeOffset('stack', 0, 1, 1, [0, 0, 0])[2]), 'stack travel scales with t');
 });
 
 test('timing chain path wraps the sprockets', () => {
@@ -323,6 +330,20 @@ test('quality policy: auto drops bloom before resolution and recovers in reverse
   assert.equal(low.maxPixelRatio, 1.5);
   adaptQuality(low, 5);
   assert.equal(low.bloom, false, 'low never blooms');
+});
+
+test('quality samples: hitches do not read as a slow device, a slow device does', () => {
+  // 60 fps with a burst of shader-compile hitches at boot: the window stays fast enough.
+  const boot = Array.from({ length: QUALITY_WINDOW }, (_, i) => (i < 12 ? 250 : 16.7));
+  const mean = boot.reduce((a, b) => a + b, 0) / boot.length;
+  assert.ok(mean > SLOW_MS, 'the plain mean would have dropped bloom');
+  assert.equal(typicalFrameMs(boot), 16.7);
+  assert.equal(adaptQuality(initialQuality('auto', { dpr: 3, cores: 6 }), typicalFrameMs(boot)), null);
+  // A device that really runs at 30 fps sheds load.
+  const slow = Array.from({ length: QUALITY_WINDOW }, (_, i) => (i % 9 ? 33.3 : 16.7));
+  assert.ok(typicalFrameMs(slow) > SLOW_MS);
+  assert.equal(typicalFrameMs([10, 30]), 20);
+  assert.equal(typicalFrameMs([]), 0);
 });
 
 test('head layout: each cam sits on its valve axis above the bucket, with clearances', () => {

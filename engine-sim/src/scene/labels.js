@@ -36,6 +36,7 @@ export class StrokeLabels {
     this.chips = [];
     this.blockers = [];
     this.v = new THREE.Vector3();
+    this.byY = (a, b) => this.chips[a].ty - this.chips[b].ty; // reused every frame
   }
 
   /** Screen rects the chips must stay off (HUD cards, pedals), canvas CSS px: [{left, top, right, bottom}]. */
@@ -94,7 +95,7 @@ export class StrokeLabels {
     const order = this.order ?? (this.order = []);
     order.length = 0;
     for (let i = 0; i < n; i++) order.push(i);
-    order.sort((a, b) => this.chips[a].ty - this.chips[b].ty);
+    order.sort(this.byY);
     for (let k = 0; k < n; k++) {
       const c = this.chips[order[k]];
       if (!c.w) {
@@ -118,12 +119,14 @@ export class StrokeLabels {
         }
       }
     }
+    const top = (insets?.top ?? 0) + 10;
+    const bottom = height - (insets?.bottom ?? 0) - 10;
     for (let i = 0; i < n; i++) {
       const c = this.chips[i];
       const x = Math.round(c.tx);
       const y = Math.round(c.ty);
       // Never draw over the HUD bars or off the edges.
-      const off = !c.front || y < insets.top + 10 || y > height - insets.bottom - 10 || x < c.w / 2 + 4 || x > width - c.w / 2 - 4
+      const off = !c.front || y < top || y > bottom || x < c.w / 2 + 4 || x > width - c.w / 2 - 4
         || this.covered(x, y, c.w);
       if (x !== c.x || y !== c.y) {
         c.x = x;
