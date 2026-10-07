@@ -209,7 +209,10 @@ const app = {
     startEngine() {
       audio.unlock();
       if (sim.blown) {
+        // REBUILD on the stall card: rebuild, then crank straight away when the
+        // clutch-safety switch allows it, so one tap gets the engine running again.
         app.actions.repair();
+        if (sim.canCrank()) sim.startEngine();
         return;
       }
       if (sim.running) return;
@@ -387,9 +390,30 @@ function layout() {
   document.documentElement.style.setProperty('--controls-h', `${Math.round(bottom + 10)}px`);
   document.documentElement.style.setProperty('--hud-top-h', `${Math.round(top)}px`);
   // In portrait the HUD bars span the width, so frame the engine between them.
-  // In landscape they sit in the corners and the centre column stays clear.
+  // In landscape they sit down the left and right edges, so frame it in the
+  // clear centre column between those clusters instead.
   const landscape = w > h * 1.15;
-  view.resize(w, h, landscape ? { top: top * 0.25, bottom: 0 } : { top, bottom: bottom * 0.75 });
+  let insets = { top, bottom: bottom * 0.75 };
+  if (landscape) {
+    // Only clusters that reach down into the band the model occupies (the lower
+    // ~55 % of the screen) count; the top corner cards sit above it.
+    const band = h * 0.45;
+    const rect = (sel) => {
+      const node = document.querySelector(sel);
+      if (!node || node.hidden || !node.childElementCount) return null;
+      const r = node.getBoundingClientRect();
+      return r.width && r.height && r.bottom > band ? r : null;
+    };
+    const leftEdges = ['.tach', '.shifter-wrap'].map(rect).filter(Boolean).map((r) => r.right);
+    const rightEdges = ['.hud-right', '#tool-rail', '.pedal-wrap'].map(rect).filter(Boolean).map((r) => r.left);
+    const left = leftEdges.length ? Math.max(...leftEdges) + 8 : 0;
+    const right = rightEdges.length ? w - Math.min(...rightEdges) + 8 : 0;
+    // Keep the model centred (shifting it sideways slides it under the tall
+    // tach card) but size it to the narrower side's clearance.
+    const side = Math.min(left, right);
+    insets = w - 2 * side > w * 0.35 ? { top: top * 0.25, bottom: 0, left: side, right: side } : { top: top * 0.25, bottom: 0 };
+  }
+  view.resize(w, h, insets);
   view.frameModel(!userMovedCamera);
   bus.emit('layout', { width: w, height: h, landscape });
 }
