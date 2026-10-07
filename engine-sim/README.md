@@ -1,13 +1,14 @@
 # Firing Order — engine & gearbox simulator
 
-A 3D engine and manual-transmission simulator for the browser, built for
-Safari on iPhone and installable as a home-screen web app. A see-through
-engine turns over in slow motion, each cylinder lights up as it fires, and you
-drive it with a touch H-gate, a clutch, a brake and a gas pedal while a
-procedural engine note follows the revs.
+A 3D engine, gearbox and drag-strip simulator for the browser, built for Safari
+on iPhone and installable as a home-screen web app. A see-through engine turns
+over in slow motion: pistons, rods, cams and valves move to the real firing
+order, each cylinder glows through its four strokes, and the headers heat up as
+you lean on it. You drive it with a touch H-gate (or sequential paddles), a
+clutch, a brake and a gas pedal while a procedural engine note follows the revs.
 
 Three.js renders the scene, the Web Audio API makes the sound, and everything
-else is plain ES modules with no framework and no build step.
+else is plain ES modules: no framework and no build step.
 
 ## Run it
 
@@ -19,21 +20,16 @@ npx serve .          # or: python3 -m http.server
 ```
 
 Open the printed URL. To try it on a phone, serve on your LAN and open
-`http://<your-computer>:3000` in Safari, then **Share → Add to Home Screen**
-to install it full screen, without browser chrome.
+`http://<your-computer>:3000` in Safari, then **Share → Add to Home Screen** to
+run it full screen.
 
-Single-file build (CSS and JS inlined; three.js still comes from the CDN):
-
-```sh
-npm install
-npm run build        # → dist/engine-sim.html
-```
-
-Tests (kinematics, firing orders, exhaust spectra, clutch, stalls, shifting):
-
-```sh
-npm test
-```
+| Command | What it does |
+| --- | --- |
+| `npm install` | dev dependencies only (esbuild for the single-file build, three for offline tests) |
+| `npm test` | 150+ unit tests: kinematics, physics, gearbox, boost, damage, sound, drag timing, dyno, cylinder pressure, HUD helpers |
+| `npm run lint` | undefined names, unused code, unreachable code |
+| `npm run smoke` | boots the app in headless Chromium at iPhone size and drives it; `--scenario tools/scenarios/<name>.mjs` for the feature scenarios |
+| `npm run build` | `dist/engine-sim.html`: one self-contained file (three.js still loads from the CDN) |
 
 ## Driving it
 
@@ -42,116 +38,106 @@ npm test
 | Gas | hold **GAS**; slide up to ease off | Space / ↑ / W |
 | Clutch | hold **CLUTCH**; slide up to feed it in | Shift / C |
 | Brake | hold **BRAKE** | B / ↓ / S |
-| Gears | drag the knob through the H-gate | 1–5, R, N |
-| Start after a stall | **START** (clutch down or in neutral) | Enter / I |
+| Gears (H-pattern) | drag the knob through the gate | 1–5, R, N |
+| Gears (sequential) | **▲ / ▼** paddles | E / Q |
+| Start, or rebuild a blown engine | **START / REBUILD** on the card | Enter / I |
 | Camera | drag to orbit, pinch to zoom, two fingers to pan, double-tap to reset | V resets |
-| Panels | telemetry and settings buttons, top right | T, G, M (mute), Esc |
+| Freeze the crank and scrub it | freeze tool, then the slider | F, then `[` / `]` jump between firings |
+| Panels | telemetry, settings and the tool rail | T, G, M (mute), Esc closes the top layer |
 
-- The engine revs freely with the clutch past 80 % travel or in neutral.
-- Shifting without the clutch grinds unless the revs already match the new
-  gear within 300 rpm. Reverse only goes in at walking pace or slower.
-- Dump the clutch at idle in first and the engine stalls. Feed it in with a
-  little gas, or slide up the clutch slowly, and it pulls away.
-- Roll a stalled car in gear with the clutch up and it bump-starts.
-- **Automatic** mode (settings) shifts up near redline (6,200 rpm on the
-  7,000 rpm V8; earlier under part throttle), shifts down below 2,000 rpm,
-  kicks down at full throttle and runs the clutch itself.
+The tool rail holds the camera presets, cinematic orbit, exploded view, display
+mode (glass → x-ray → cutaway), freeze, the garage, the drag strip and the dyno.
 
-## What is modelled
+## What is in it
 
-**Slider-crank kinematics.** Each piston's distance from the crank axis is
+**Engines.** Crossplane and flat-plane V8s, V6, V10 and V12, inline 3/4/5/6,
+boxer-4 and flat-6, a 45° V-twin with its uneven firing, and 1–3 rotor Wankels.
+Idle, redline, displacement, bore/stroke, variable valve lift and forced
+induction are all adjustable. The **garage** has twelve ready builds, from a
+small-block V8 to a twin-turbo rotary and a 9,000 rpm flat-six.
 
-```
-pY = r·cos(θ) + sqrt(L² − (r·sin(θ))²)
-```
+**Kinematics.** Each piston follows the slider-crank equation
+`pY = r·cos θ + sqrt(L² − (r·sin θ)²)` with θ measured from that cylinder's TDC.
+Crank throws, bank angles and firing order all come from one table, and the
+tests check that paired cylinders share pins, crossplane throws sit at
+0/90/180/270°, boxer pairs are opposed and the V-twin rods share one pin. Cams
+turn at half crank speed and every valve opens on its own stroke.
 
-where θ is the crank angle measured from that cylinder's top dead centre. For a
-cylinder that fires at `fireDeg` the crank pin sits at `bankDeg − fireDeg`, so
-the crank throws, the V angle and the firing order all come from one table
-(`src/config.js`). The tests check that each pair of V8, V10 and V12 cylinders
-lands on a shared pin, that the crossplane throws sit at 0/90/180/270° and the
-flatplane at 0/180°, and that the firing sequence matches the configured order.
+**Drivetrain.** Engine and car are two inertias joined by a friction clutch that
+slips until the speeds meet and then locks. Torque comes from a per-layout curve
+scaled by throttle and live boost, minus friction and pumping losses, with an
+idle controller, a rev limiter and stalls.
+- **H-pattern:** grinds without the clutch unless the revs match; auto-blip assist.
+- **Sequential:** automated clutch, flat-shift upshifts with an ignition cut,
+  blipped downshifts, and refusal of downshifts that would over-rev.
+- **Automatic:** shifts up near redline, down below 2,000 rpm, kicks down.
+- **Launch control** (two-step) and **traction control**.
 
-| Layout | Firing order | Crank |
-| --- | --- | --- |
-| V8 Crossplane | 1-8-4-3-6-5-7-2 | 90° V, crossplane |
-| V8 Flatplane | 1-8-3-6-4-5-2-7 | 90° V, flat-plane |
-| Inline-4 | 1-3-4-2 | flat |
-| V6 | 1-2-3-4-5-6 | 60° V, split pins |
-| Rotary | 1, 2 or 3 rotors | eccentric shaft, rotor at ⅓ speed |
+**Boost, heat and damage.** Turbo (with lag and a blow-off valve), twin-turbo and
+supercharger models; coolant, oil and exhaust temperatures; over-revving (a
+money shift) damages the engine and can blow it up, after which it needs a
+rebuild.
 
-The cylinder control switches within a family: I3/I4/I5/I6, V6/V8/V10/V12, or
-1–3 rotors. In the Wankel the rotor apexes trace the epitrochoid bore exactly.
+**Visuals.** Glass block with chrome internals, DOHC valvetrain and timing chain,
+stroke-coloured gas in each cylinder (intake, compression, power, exhaust),
+headers that glow with exhaust temperature, tailpipe flames on overrun and
+launch control, turbo, supercharger and intake hardware, x-ray and cutaway
+modes, an animated exploded view, camera presets and a cinematic orbit, and a
+blow-up with smoke, sparks and a thrown rod. Bloom and resolution adapt to the
+device's frame rate.
 
-**Drivetrain.** The engine and the car are two inertias joined by a friction
-clutch. The clutch slips at its capacity until the speeds meet, then locks
-until the torque through it exceeds that capacity again. Engine torque comes
-from a per-layout wide-open-throttle curve scaled by throttle, minus friction
-and pumping losses. On top of that:
+**Sound.** Each exhaust bank plays a wave built from its real pulse train, so a
+crossplane burbles and a flat-plane screams, crossfaded between light and heavy
+load, with pipe resonance, intake roar, valvetrain tick and a short reverb.
+Turbo whistle, blow-off valve, supercharger whine, pops and bangs on overrun
+and two-step, flat-shift cracks, rod knock on a damaged engine and an explosion
+when it lets go. Audio starts on the first touch (an iOS requirement) and plays
+through the silent switch on Safari 17+.
 
-- an idle-speed PI controller holds the idle;
-- a rev limiter cuts fuel at redline;
-- the engine stalls below 45 % of idle.
+**Drag strip.** Staging, a sportsman tree, red lights, reaction time, 60 ft /
+330 ft / ⅛ mile / 1000 ft / ¼ mile splits with speeds, a time slip and personal
+bests per engine.
 
-Road speed is the wheel speed: rpm ÷ (gear × final drive) × tyre
-circumference. The tyres limit the drive force, so a hard launch in first
-spins them.
+**Dyno.** Puts the car on rollers for a 4th-gear pull and plots measured torque
+and power against the rated curve, keeping the last three runs.
 
-**Sound.** Each exhaust bank gets a `PeriodicWave` built from its own pulse
-train over a 720° cycle, so the crossplane's uneven bank firing produces its
-burble and the flatplane sounds smoother. The same Fourier analysis is unit
-tested. Layered on top of that:
+**Telemetry.** Peak rpm, top speed, 0–100 km/h, distance, live torque and power
+curves, a score for every shift (rev match, clutch heat, time between gears),
+a live cylinder-pressure trace and P–V loop with IMEP, and 17 achievements.
 
-- sawtooth and triangle oscillators at the firing frequency;
-- a waveshaper and a low-pass filter that open with load and rpm;
-- intake noise, gear whine, a starter motor, grinding, and overrun pops when
-  you lift off at high rpm.
-
-Audio starts on the first `touchstart` because iOS requires a user gesture.
-On Safari 17+ it sets `navigator.audioSession.type = 'playback'`, so sound
-plays even with the silent switch on.
-
-**Telemetry.** Live torque and power curves with the current operating point
-marked; the curves follow the bore/stroke setting. The panel also shows peak
-rpm, top speed, best 0–100 km/h time and distance. Every shift gets a 0–100
-score from:
-
-- the rev mismatch at the bite point;
-- the energy dumped into the clutch;
-- the time between gears.
-
-The shift log also records grinds and stalls.
-
-## Layout of the code
+## Code layout
 
 ```
-index.html            HUD markup, PWA meta tags, import map for three.js
-styles.css            HUD, pedals, H-gate, panels
-src/config.js         engine layouts, firing orders, torque curves, drivetrain defaults
-src/kinematics.js     slider-crank, crank-pin angles, Wankel geometry
-src/physics.js        engine, clutch, vehicle (slip/lock model, stall, limiter)
-src/gearbox.js        manual selection and grind rules, automatic controller, shift scoring
-src/session.js        peaks, 0–100, distance
-src/exhaust.js        exhaust pulse trains → Fourier coefficients
-src/audio.js          Web Audio graph and iOS unlock
-src/scene.js          Three.js scene: engine, rotary, flywheel, clutch, gearbox, flashes
-src/controls.js       pedals, H-shifter, keyboard
-src/ui.js             settings sheet, telemetry charts and shift log
-src/main.js           wiring and the frame loop
-tools/build.mjs       single-file build with esbuild
-test/                 node:test suites
+index.html, styles.css   HUD markup and styles, PWA meta tags, import map for three.js
+src/main.js              app context, feature registry, frame loop, debug API
+src/config.js            layouts, firing orders, torque curves, settings
+src/kinematics.js        slider-crank, crank pins, Wankel geometry
+src/physics.js           engine, clutch, car; launch control, traction control, limiter
+src/induction.js         turbo / twin-turbo / supercharger
+src/thermal.js           temperatures and damage
+src/gearbox.js           H-pattern, sequential and automatic; shift scoring
+src/presets.js           the garage
+src/scene.js, scene/     Three.js: engine, valvetrain, gases, exhaust, induction, effects, camera, bloom
+src/audio.js, audio/     Web Audio engine, wave tables, impulse response, voice pool
+src/hud.js, ui.js        tach, gauges, shift lights, settings, garage, telemetry
+src/controls.js          pedals, H-gate, paddles, keyboard
+src/modes/, pv.js        drag strip, dyno, cylinder pressure
+src/achievements.js      achievements
+src/features/            one module per feature area, plugged in through src/features/index.js
+docs/CONTRACT.md         how the pieces talk: app context, events, settings, view API
+tools/smoke.mjs          headless browser harness; tools/scenarios/ has one scenario per area
+test/                    node:test suites
 ```
 
-`config.js`, `kinematics.js`, `physics.js`, `gearbox.js`, `session.js` and
-`exhaust.js` touch neither the DOM nor three.js, so they run under Node.
+The pure modules (config, kinematics, physics, induction, thermal, gearbox,
+presets, modes, pv, achievements, exhaust) never touch the DOM or three.js, so
+they run under Node.
 
 ## Notes
 
-- The visuals run slowed down (1/25 by default, as in the reference clip) so
-  single strokes stay readable. Physics, the HUD and the sound always run in
-  real time. Change the slowdown under **Settings → Animation speed**.
-- Settings are saved in `localStorage` for each browser.
-- The renderer lowers its pixel ratio when frames run slow and raises it again
-  when there is headroom.
-- three.js 0.186.1 loads from jsDelivr through an import map, so the first
-  load needs a network connection. Import maps need Safari 16.4 or newer.
+- The visuals run slowed down (1/25 by default) so single strokes stay readable;
+  physics, the HUD and the sound always run in real time.
+- Settings, personal bests, dyno runs and achievements are kept in
+  `localStorage` for each browser.
+- three.js 0.186.1 loads from jsDelivr through an import map, so the first load
+  needs a connection. Import maps need Safari 16.4 or newer.
