@@ -111,6 +111,52 @@ export function headDims(B, deck) {
   };
 }
 
+/**
+ * Crankcase cross-section (engine frame, XY) as circles whose convex hull is
+ * the outline, or null for a plain box (inline and V engines). A boxer's case
+ * halves reach out to both decks and enclose the bores; a V-twin's is a round
+ * flywheel case that climbs to the cylinder bases.
+ * dims: {B, r (crank throw), deck, sleeveBase (bore bottom along the bank axis), halfAngleDeg}
+ */
+export function crankcaseCircles(layout, { B, r, deck, sleeveBase, halfAngleDeg = 0 }) {
+  if (layout === 'boxer') {
+    const wing = 0.3 * B;
+    const wx = deck - wing;
+    const wy = 0.64 * B - wing;
+    return [
+      { x: 0, y: 0, r: r + 0.45 * B },
+      { x: wx, y: wy, r: wing }, { x: wx, y: -wy, r: wing },
+      { x: -wx, y: wy, r: wing }, { x: -wx, y: -wy, r: wing },
+    ];
+  }
+  if (layout === 'vtwin') {
+    const a = halfAngleDeg * DEG;
+    const d = sleeveBase + 0.2 * B;
+    const base = 0.56 * B;
+    return [
+      { x: 0, y: 0, r: r + 0.6 * B },
+      { x: Math.sin(a) * d, y: Math.cos(a) * d, r: base },
+      { x: -Math.sin(a) * d, y: Math.cos(a) * d, r: base },
+    ];
+  }
+  return null;
+}
+
+/** Axis-aligned extent of a set of circles: {minX, maxX, minY, maxY}. */
+export function circlesExtent(circles) {
+  let minX = Infinity;
+  let maxX = -Infinity;
+  let minY = Infinity;
+  let maxY = -Infinity;
+  for (const c of circles) {
+    minX = Math.min(minX, c.x - c.r);
+    maxX = Math.max(maxX, c.x + c.r);
+    minY = Math.min(minY, c.y - c.r);
+    maxY = Math.max(maxY, c.y + c.r);
+  }
+  return { minX, maxX, minY, maxY };
+}
+
 // Exploded-view travel at t = 1, in bore diameters.
 export const EXPLODE = Object.freeze({
   head: 1.7, // heads, cams and valves, along the bank axis

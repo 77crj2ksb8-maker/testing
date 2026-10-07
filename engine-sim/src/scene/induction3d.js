@@ -148,10 +148,26 @@ export class Induction {
     const outlets = [];
     this.starts = [];
     this.feed = [];
+    const at = [];
     for (let i = 0; i < count; i++) {
       const g = collectors[i];
       const t = g.collector.clone().addScaledVector(g.out, 0.55 * B);
       t.y += 0.15 * B;
+      at.push(t);
+    }
+    // Two turbos on one side of the engine (one bank split front/rear): keep
+    // the rear compressor clear of the front turbine.
+    if (count === 2 && Math.abs(at[0].x - at[1].x) < 1.2 * B) {
+      const [front, rear] = at[0].z >= at[1].z ? at : [at[1], at[0]];
+      const short = 1.5 * B - (front.z - rear.z);
+      if (short > 0) {
+        front.z += short / 2;
+        rear.z -= short / 2;
+      }
+    }
+    for (let i = 0; i < count; i++) {
+      const g = collectors[i];
+      const t = at[i];
       const turbine = new THREE.Mesh(turbineGeo, M.turbine);
       turbine.position.copy(t);
       this.glowing.push(turbine);

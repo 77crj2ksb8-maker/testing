@@ -65,7 +65,8 @@ export class ExhaustSystem {
         mid.y -= 0.12 * B;
         geos.push(pipeGeometry([g.feed.from, mid, g.feed.to], 0.13 * B, 12, 10));
       }
-      const col = new THREE.SphereGeometry(0.22 * B, 16, 12);
+      // A merge collector; a lone primary only needs a small joint.
+      const col = new THREE.SphereGeometry((g.ports.length > 1 ? 0.22 : 0.14) * B, 16, 12);
       col.translate(g.collector.x, g.collector.y, g.collector.z);
       geos.push(col);
       const headers = new THREE.Mesh(merge(geos), M.header);

@@ -8,13 +8,21 @@ import {
 } from '../src/scene/timing.js';
 import {
   layoutOf, bankList, exhaustSide, bankToEngine, cylinderPlacement, explodeOffset, chainPath, pointOnPath,
+  crankcaseCircles, circlesExtent,
 } from '../src/scene/layout.js';
+import { GARAGE, garagePatch } from '../src/presets.js';
 import { initialQuality, adaptQuality, SLOW_MS, FAST_MS } from '../src/scene/quality.js';
 import { acesFilmic, untoneMapped } from '../src/scene/tonemap.js';
 import { headDims } from '../src/scene/layout.js';
 
 const near = (a, b, eps = 1e-9) => Math.abs(a - b) <= eps;
 const profile = (preset, cylinders) => buildProfile({ ...DEFAULT_SETTINGS, preset, cylinders });
+const garage = (id) => buildProfile({ ...DEFAULT_SETTINGS, ...garagePatch(id) });
+// Every piston layout the powertrain builds: V8s, V10, V12, inline 4/6, boxer-4, flat-6 and the V-twin.
+const PISTON_PROFILES = () => [
+  profile('v8-cross', 8), profile('v8-flat', 8), profile('i4', 4), profile('i6', 6), profile('v8-flat', 10),
+  profile('v8-flat', 12), profile('boxer', 4), profile('boxer', 6), profile('vtwin', 2),
+];
 
 // A boxer-4 built by hand (bank A on +X, bank B on −X, one throw per cylinder,
 // opposed pairs 180° apart), without a `layout` field, as the renderer may get it.
@@ -50,7 +58,7 @@ test('cams turn at half crank speed in the crank direction', () => {
 });
 
 test('every cam lobe points at its follower exactly at peak lift, for every cylinder', () => {
-  for (const p of [profile('v8-cross', 8), profile('i4', 4), profile('v8-flat', 12), syntheticBoxer()]) {
+  for (const p of [...PISTON_PROFILES(), syntheticBoxer()]) {
     for (const c of p.cylinders) {
       for (const [peak, dur, lift] of [[INTAKE_PEAK, INTAKE_DURATION, intakeLift], [EXHAUST_PEAK, EXHAUST_DURATION, exhaustLift]]) {
         for (const follower of [-90, -78, -102]) {
@@ -165,7 +173,7 @@ test('bank frames: cylinder axis, exhaust side outside the V and under a boxer',
 test('cylinder placement: neighbours in a bank never overlap, opposed boxer pistons interleave', () => {
   const B = 1;
   const rodW = 0.24;
-  for (const p of [profile('v8-cross', 8), profile('i4', 4), profile('v8-cross', 12), syntheticBoxer()]) {
+  for (const p of [...PISTON_PROFILES(), syntheticBoxer()]) {
     const { z, half } = cylinderPlacement(p, B, rodW);
     for (const bank of bankList(p)) {
       const zs = bank.members.map((i) => z[i]).sort((a, b) => a - b);
@@ -176,6 +184,76 @@ test('cylinder placement: neighbours in a bank never overlap, opposed boxer pist
   const boxer = cylinderPlacement(syntheticBoxer(), B, rodW);
   assert.ok(boxer.pitch < 1, 'boxer throws sit closer than one bore');
   assert.ok(new Set(boxer.z).size === 4, 'each boxer cylinder has its own throw');
+});
+
+test('real layouts: boxer banks opposed, V-twin rods on one pin, layouts named by the profile', () => {
+  const B = 1;
+  const rodW = 0.24;
+  const out = [0, 0];
+  for (const [p, layout] of [[profile('boxer', 4), 'boxer'], [profile('boxer', 6), 'boxer'], [profile('vtwin', 2), 'vtwin'], [profile('i6', 6), 'inline']]) {
+    assert.equal(layoutOf(p), layout);
+    assert.equal(layoutOf({ ...p, layout: undefined }), layout, `${p.id}: derived layout matches the named one`);
+  }
+  for (const n of [4, 6]) {
+    const p = profile('boxer', n);
+    const banks = bankList(p);
+    assert.deepEqual(banks.map((b) => b.bankDeg), [90, -90], 'one bank each side, lying flat');
+    // Heads on both sides and both exhausts underneath.
+    for (const b of banks) {
+      bankToEngine(b.bankDeg, 0, 1, out);
+      assert.ok(near(Math.abs(out[0]), 1) && near(out[1], 0), 'cylinder axis is horizontal');
+      bankToEngine(b.bankDeg, exhaustSide(b.bankDeg), 0, out);
+      assert.ok(near(out[1], -1), 'exhaust underneath');
+    }
+    // Opposed neighbours: adjacent throws carry one cylinder from each bank, pins 180° apart.
+    const byThrow = [...p.cylinders].sort((a, b) => a.throwIndex - b.throwIndex);
+    for (let k = 0; k + 1 < byThrow.length; k += 2) {
+      const [a, b] = [byThrow[k], byThrow[k + 1]];
+      assert.notEqual(a.bank, b.bank, `${p.id}: throws ${k}/${k + 1} are opposed`);
+      assert.ok(near(Math.abs(wrapSigned(a.pinDeg - b.pinDeg)), 180, 1e-9), `${p.id}: opposed pins 180° apart`);
+    }
+    const { z } = cylinderPlacement(p, B, rodW);
+    assert.equal(new Set(z).size, n, 'each boxer cylinder on its own throw');
+  }
+  const twin = profile('vtwin', 2);
+  const { z } = cylinderPlacement(twin, B, rodW);
+  assert.equal(twin.cylinders[0].throwIndex, twin.cylinders[1].throwIndex, 'one shared throw');
+  assert.equal(twin.cylinders[0].pinDeg, twin.cylinders[1].pinDeg, 'one shared pin');
+  assert.ok(Math.abs(z[0] - z[1]) >= rodW && Math.abs(z[0] - z[1]) < 0.5 * B, 'rods side by side on the pin');
+  assert.ok(near(z[0], -z[1]), 'centred on the pin');
+});
+
+test('crankcase outline: a boxer case spans deck to deck, a V-twin case wraps the flywheels', () => {
+  const B = 1;
+  const r = 0.5;
+  const deck = 2.6;
+  const box = crankcaseCircles('boxer', { B, r, deck, sleeveBase: 1.0 });
+  const e = circlesExtent(box);
+  assert.ok(near(e.maxX, deck) && near(e.minX, -deck), 'out to both decks, where the heads bolt on');
+  assert.ok(e.maxY >= r + 0.4 * B, 'clears the crank throw and webs');
+  assert.ok(e.maxY - e.minY < e.maxX - e.minX, 'flat: wider than tall');
+  const wingTop = Math.max(...box.slice(1).map((c) => c.y + c.r));
+  assert.ok(wingTop >= 0.52 * B && wingTop < e.maxY, 'wings cover the bores and step down from the crank bulge');
+  const vt = crankcaseCircles('vtwin', { B, r, deck, sleeveBase: 0.8, halfAngleDeg: 22.5 });
+  const ev = circlesExtent(vt);
+  assert.ok(ev.minY <= -(r + 0.55 * B), 'room for the flywheels below the crank');
+  assert.ok(ev.maxY >= 0.8, 'reaches the cylinder bases');
+  assert.ok(near(ev.maxX, -ev.minX), 'symmetric about the crank');
+  assert.equal(crankcaseCircles('v', { B, r, deck, sleeveBase: 1 }), null, 'V and inline blocks stay boxes');
+  assert.equal(crankcaseCircles('inline', { B, r, deck, sleeveBase: 1 }), null);
+});
+
+test('every garage build resolves to a layout the renderer knows', () => {
+  for (const g of GARAGE) {
+    const p = garage(g.id);
+    assert.ok(['inline', 'v', 'boxer', 'vtwin', 'rotary'].includes(layoutOf(p)), `${g.id}: ${layoutOf(p)}`);
+    if (p.kind !== 'rotary') {
+      const B = p.boreMm / 100;
+      const { z, half } = cylinderPlacement(p, B, 0.24 * B);
+      assert.equal(z.length, p.cylinders.length);
+      for (const v of z) assert.ok(Number.isFinite(v) && Math.abs(v) < half, `${g.id}: cylinder inside the block`);
+    }
+  }
 });
 
 test('exploded view moves heads along the bank axis and the gearbox back', () => {

@@ -34,6 +34,13 @@ export default {
       if (s > 0.5) view.burst?.('sparks', { strength: s * 0.5 });
     });
     bus.on('overheat', () => view.burst?.('smoke', { strength: 0.5 }));
+    // The block rocks on its mounts when the engine catches, dies or a gear is forced.
+    bus.on('start', () => view.shake?.(0.12));
+    bus.on('stall', () => view.shake?.(0.22));
+    bus.on('grind', () => buzz(0.1));
+    bus.on('shift', (e = {}) => {
+      if (e.flat) buzz(0.1);
+    });
     bus.on('blown', () => view.blowUp?.());
     bus.on('repair', () => view.restore?.());
     // A rebuilt model (new engine) starts whole; if the engine is still blown, show it.

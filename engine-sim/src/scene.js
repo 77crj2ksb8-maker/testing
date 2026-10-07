@@ -14,7 +14,8 @@ import {
   cylAlongZ, crankWebGeometry, merge, withEdges, roundedBox, setRotZ,
 } from './scene/geometry.js';
 import {
-  layoutOf, bankList, exhaustSide, bankToEngine, cylinderPlacement, explodeOffset, headDims,
+  layoutOf, bankList, exhaustSide, bankToEngine, cylinderPlacement, explodeOffset, headDims, crankcaseCircles,
+  circlesExtent, chainPath,
 } from './scene/layout.js';
 import { buildValvetrain } from './scene/valvetrain.js';
 import { buildRotary } from './scene/rotary.js';
@@ -366,20 +367,33 @@ export class EngineView {
     this.engine.add(this.valvetrain.chain);
     for (const m of this.valvetrain.metal) this.addMetal(m);
 
-    // Crankcase and sump: a boxer's is wide and flat around the crank.
+    // Crankcase and sump: a boxer's case is wide and flat out to both decks,
+    // a V-twin's a round flywheel case; inline and V blocks are plain boxes.
     let caseW;
     let caseH;
     let caseY;
-    if (boxer) {
-      caseW = 2 * (r + 0.55 * B);
-      caseH = 2 * (r + 0.5 * B);
+    let caseGeo;
+    const circles = crankcaseCircles(this.layout, {
+      B, r, deck, sleeveBase: deck - sleeveLen, halfAngleDeg: Math.abs(banks[0]?.bankDeg ?? 0),
+    });
+    if (circles) {
+      const hull = chainPath(circles, 40);
+      const shape = new THREE.Shape();
+      for (let i = 0; i < hull.n; i++) shape[i ? 'lineTo' : 'moveTo'](hull.x[i], hull.y[i]);
+      caseGeo = new THREE.ExtrudeGeometry(shape, { depth: half * 2, bevelEnabled: false });
+      caseGeo.translate(0, 0, -half);
+      const ext = circlesExtent(circles);
+      // Width and height of the part under the crank, which sizes the sump.
+      caseW = 2 * circles[0].r;
+      caseH = -2 * ext.minY;
       caseY = 0;
     } else {
       caseW = 2 * (r + 0.3 * B) + (this.banks.length > 1 ? B * 0.6 : 0);
       caseH = r + 0.5 * B + r * 0.8;
       caseY = r * 0.8 - caseH / 2;
+      caseGeo = new THREE.BoxGeometry(caseW, caseH, half * 2);
     }
-    const crankcase = new THREE.Mesh(new THREE.BoxGeometry(caseW, caseH, half * 2), M.glass);
+    const crankcase = new THREE.Mesh(caseGeo, M.glass);
     crankcase.position.y = caseY;
     this.engine.add(withEdges(crankcase, M.edge));
     const sump = new THREE.Mesh(roundedBox(caseW * 0.82, 0.38 * B, half * 1.7, 0.1 * B), M.glassDark);
@@ -390,7 +404,7 @@ export class EngineView {
     this.geom.lowY = sump.position.y - 0.19 * B;
     // Where a failed rod breaks out: the side facing the default camera (the top of a boxer).
     this.geom.breachNormal = boxer ? v3(0, 1, 0) : v3(1, 0, 0);
-    this.geom.breachAt = boxer ? v3(0, caseY + caseH / 2 + 0.01, 0) : v3(caseW / 2 + 0.01, caseY + caseH * 0.15, 0);
+    this.geom.breachAt = boxer ? v3(0, caseY + caseH / 2 + 0.01, 0) : v3(caseW / 2 + 0.01, circles ? 0 : caseY + caseH * 0.15, 0);
 
     // Ports in the engine frame, for headers and intake runners.
     const pt = [0, 0];
@@ -431,7 +445,7 @@ export class EngineView {
       frontZ: this.geom.pulleyZ, lowY: this.geom.lowY,
     });
     for (const f of ind.feed ?? []) plan[f.group].feed = f;
-    const starts = ind.starts ?? plan.map((g, i) => ({ group: i, from: g.collector.clone().add(v3(0, 0, -0.25 * B)) }));
+    const starts = ind.starts ?? plan.map((g, i) => ({ group: i, from: g.collector.clone().add(v3(0, 0, -0.12 * B)) }));
     this.exhaust = new ExhaustSystem(plan, {
       B, M: this.M, starts, crossovers: ind.crossovers,
       run: { x: 1.32, y: -1.35, startZ: this.dl.caseFront, endZ: this.dl.outputEnd - 0.2 },
