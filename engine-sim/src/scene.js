@@ -1101,7 +1101,7 @@ export class EngineView {
     this.thrown.visible = true;
     this.blown = {
       t: 0, resting: false,
-      vel: v3(n.x * 3.4 + 0.5, 8 + n.y * 2, 1.8),
+      vel: v3(n.x * 2.3 + 0.3, 8.5 + n.y * 2, 0.9), // lands beside the block, in view
       spin: v3(7, 3.5, 11),
     };
     // Breach in the block where the rod came out.
