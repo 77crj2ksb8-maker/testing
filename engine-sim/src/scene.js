@@ -104,6 +104,7 @@ export class EngineView {
     markBloom(this.effects.sparks.points);
     this.rig = new CameraRig(this.camera, this.controls);
     this.post = new PostFX(this.renderer, this.scene, this.camera);
+    this.post.setLights([hemi, key, rim, ...this.flashLights, this.fxLight]);
     this.labels = new StrokeLabels(canvas);
 
     this.root = null;

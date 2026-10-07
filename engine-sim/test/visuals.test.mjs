@@ -153,6 +153,12 @@ test('layout is derived when the profile does not name it', () => {
   assert.equal(layoutOf({ ...syntheticBoxer(), layout: 'boxer' }), 'boxer');
   const twin = { kind: 'piston', banks: 2, cylinders: [{ bank: 0, bankDeg: 22.5 }, { bank: 1, bankDeg: -22.5 }] };
   assert.equal(layoutOf(twin), 'vtwin');
+  // Real profiles with the powertrain's layout field stripped derive the same family.
+  const bare = (p) => ({ ...p, layout: undefined });
+  for (const [p, want] of [
+    [profile('v8-cross', 8), 'v'], [profile('v8-flat', 12), 'v'], [profile('i6', 6), 'inline'],
+    [profile('boxer', 4), 'boxer'], [profile('boxer', 6), 'boxer'], [profile('vtwin', 2), 'vtwin'], [profile('rotary', 2), 'rotary'],
+  ]) assert.equal(layoutOf(bare(p)), want, `${p.name} derives ${want}`);
 });
 
 test('bank frames: cylinder axis, exhaust side outside the V and under a boxer', () => {
