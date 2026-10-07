@@ -37,6 +37,7 @@ const BLIP_LEAD = 0.12; // s of rev rise the blip anticipates (throttle-body lag
 
 // Order of the sequential selector drum.
 const seqIndex = (g) => (g === 'R' ? -1 : g === 'N' ? 0 : g);
+const formatRpm = (rpm) => String(Math.round(rpm / 50) * 50).replace(/\B(?=(\d{3})+$)/g, ',');
 const gearName = (g) => (g === 'R' ? 'reverse' : g === 'N' ? 'neutral' : `${g}${['st', 'nd', 'rd'][g - 1] ?? 'th'}`);
 
 export class Gearbox {
@@ -179,7 +180,7 @@ export class Gearbox {
       const rpm = this.rpmIn(gear);
       const limit = sim.profile.redlineRpm - DOWNSHIFT_MARGIN_RPM;
       if (rpm > limit) {
-        return `Downshift refused: ${gearName(gear)} would over-rev to ${Math.round(rpm / 50) * 50} rpm. Slow down first.`;
+        return `Too fast for ${gearName(gear)}: it would over-rev to ${formatRpm(rpm)} rpm. Slow down first.`;
       }
     }
     return null;

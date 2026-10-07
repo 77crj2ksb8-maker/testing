@@ -312,8 +312,10 @@ export class Drivetrain {
       && (this.clutchPedal >= 0.5 || this.brake >= 0.3);
     const limit = this.launchArmed ? launchRpm : p.redlineRpm;
     this.limiterRpm = limit;
-    if (rpm >= limit) {
-      if (!this.fuelCut && this.running) {
+    if (!this.running) {
+      this.fuelCut = false; // nothing to cut: a dead engine dragged past redline is not on the limiter
+    } else if (rpm >= limit) {
+      if (!this.fuelCut) {
         if (this.launchArmed) {
           if (this.time - this.lastTwoStep >= TWO_STEP_MIN_GAP) {
             this.lastTwoStep = this.time;

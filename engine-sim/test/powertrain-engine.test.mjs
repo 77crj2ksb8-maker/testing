@@ -209,6 +209,8 @@ test('a big money shift blows the engine; it will not crank until repaired', () 
   assert.equal(r.sim.blown, true);
   assert.equal(r.sim.running, false);
   assert.equal(r.sim.damage, 1);
+  assert.ok(r.sim.rpm > r.profile.redlineRpm, 'the wheels still drag the dead engine round');
+  assert.equal(r.sim.fuelCut, false, 'a dead engine is not on the limiter');
 
   // Stop, neutral: still dead, starter refuses, no bump start.
   r.run(10, { brake: 1, clutch: 1 });
