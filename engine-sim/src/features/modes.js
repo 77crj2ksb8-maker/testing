@@ -449,7 +449,6 @@ export default {
       lastResult: null,
       dirty: true,
       chartsDirty: true,
-      liveDrawn: 0,
       hoverRpm: null,
     };
 
@@ -706,30 +705,29 @@ export default {
       dragUi.root.hidden = true;
     }
 
-    // Status line for the drag card (written into msg.text / msg.tone, no allocation).
+    // Status line for the drag card, written into `msg` (no allocation per frame).
     const msg = { text: '', tone: '' };
-    function dragMessage() {
-      const p = race.phase;
-      let text = '';
-      let tone = '';
-      if (p === 'pre') {
-        if (sim.blown) [text, tone] = ['Rebuild the engine to race', 'is-bad'];
-        else if (!sim.running) text = 'Start the engine to stage';
-        else if (sim.speedKmh > 0.6) text = 'Stop the car to stage';
-        else text = 'Staging…';
-      } else if (p === 'staged') text = 'Staged. Watch the tree.';
-      else if (p === 'tree') text = 'Ready…';
-      else if (p === 'green') [text, tone] = ['GO!', 'is-go'];
-      else if (p === 'run') {
-        if (race.foul) [text, tone] = ['Red light! Still timing the run.', 'is-bad'];
-        else text = `Reaction ${race.reaction.toFixed(3)} s`;
-      }
-      else if (p === 'done') {
-        if (race.abortReason) [text, tone] = [`${race.abortReason}. Stop to stage again.`, 'is-bad'];
-        else [text, tone] = ['Finished', 'is-go'];
-      }
+    const say = (text, tone = '') => {
       msg.text = text;
       msg.tone = tone;
+    };
+    function dragMessage() {
+      const p = race.phase;
+      if (p === 'pre') {
+        if (sim.blown) say('Rebuild the engine to race', 'is-bad');
+        else if (!sim.running) say('Start the engine to stage');
+        else if (sim.speedKmh > 0.6) say('Stop the car to stage');
+        else say('Staging…');
+      } else if (p === 'staged') say('Staged. Watch the tree.');
+      else if (p === 'tree') say('Ready…');
+      else if (p === 'green') say('GO!', 'is-go');
+      else if (p === 'run') {
+        if (race.foul) say('Red light! Still timing the run.', 'is-bad');
+        else if (msg.tone !== 'rt') say(`Reaction ${race.reaction.toFixed(3)} s`, 'rt');
+      } else if (p === 'done') {
+        if (race.abortReason) say(`${race.abortReason}. Stop to stage again.`, 'is-bad');
+        else say('Finished', 'is-go');
+      } else say('');
     }
 
     function renderDrag() {
@@ -844,7 +842,6 @@ export default {
       dyno.t = 0;
       dyno.spinFrom = sim.rpm;
       dyno.lastResult = null;
-      dyno.liveDrawn = 0;
       recorder.reset(dyno.config);
       sim.setGear(DYNO_GEAR);
       holdAt(dyno.spinFrom); // locked to the rollers from the first step: no clutch dump
