@@ -18,10 +18,17 @@ function wobble(i, amount) {
  * @param {number} pulseWidth crank degrees from valve opening to pulse peak
  * @param {number} roughness per-cylinder strength variation (0..0.3)
  * @param {number[]} ids stable cylinder ids for the wobble
+ * @param {object} [shape] optional pulse shape: `rise` (crank degrees of a
+ *   smooth front followed by an exponential decay of `pulseWidth`; small = the
+ *   steep blowdown front of a full-load pulse) and a negative `reflection` wave
+ *   of that relative size arriving `reflectionDeg` after the pulse (the suction
+ *   wave bounced back from the open pipe end).
  */
-export function bankWaveform(fireDegs, pulseWidth = 40, roughness = 0.08, ids = fireDegs.map((_, i) => i)) {
+export function bankWaveform(fireDegs, pulseWidth = 40, roughness = 0.08, ids = fireDegs.map((_, i) => i), shape = {}) {
+  const { rise = 0, reflection = 0, reflectionDeg = 90 } = shape;
   const wave = new Float32Array(SAMPLES);
   const exhaustOpen = 140; // the exhaust valve opens ~140° after firing TDC
+  const reflWidth = pulseWidth * 1.6;
   fireDegs.forEach((fire, j) => {
     const amp = wobble(ids[j], roughness);
     const start = fire + exhaustOpen;
@@ -29,8 +36,19 @@ export function bankWaveform(fireDegs, pulseWidth = 40, roughness = 0.08, ids = 
       const deg = (s / SAMPLES) * 720;
       let x = deg - start;
       x = ((x % 720) + 720) % 720;
-      const u = x / pulseWidth;
-      if (u < 6) wave[s] += amp * u * Math.exp(1 - u); // fast rise, exponential decay
+      if (rise > 0) {
+        if (x < rise) wave[s] += amp * Math.sin((Math.PI / 2) * (x / rise)) ** 2;
+        else if (x - rise < 8 * pulseWidth) wave[s] += amp * Math.exp(-(x - rise) / pulseWidth);
+      } else {
+        const u = x / pulseWidth;
+        if (u < 6) wave[s] += amp * u * Math.exp(1 - u); // fast rise, exponential decay
+      }
+      if (reflection > 0) {
+        let y = deg - start - reflectionDeg;
+        y = ((y % 720) + 720) % 720;
+        const v = y / reflWidth;
+        if (v < 8) wave[s] -= amp * reflection * v * Math.exp(1 - v);
+      }
     }
   });
   let mean = 0;
@@ -70,27 +88,26 @@ export function harmonicEnergy({ real, imag }, h) {
   return real[h] * real[h] + imag[h] * imag[h];
 }
 
-/**
- * Per-bank spectra for an engine profile. For rotaries every rotor fires once
- * per shaft revolution, i.e. twice per 720° window.
- */
-export function exhaustSpectra(profile, harmonics = 256) {
-  const { banks, pulseWidth, roughness } = profile.exhaust;
-  return banks.map((members) => {
-    let fires;
-    let ids;
+/** Firing angles (0..720) and stable ids of every pulse source on each exhaust bank. */
+export function bankFirings(profile) {
+  return profile.exhaust.banks.map((members) => {
     if (profile.kind === 'rotary') {
-      fires = [];
-      ids = [];
+      // Every rotor fires once per shaft revolution, i.e. twice per 720° window.
+      const fires = [];
+      const ids = [];
       members.forEach((r) => {
         const phase = profile.rotorPhases[r];
         fires.push(phase, phase + 360);
         ids.push(r * 2, r * 2 + 1);
       });
-    } else {
-      fires = members.map((i) => profile.cylinders[i].fireDeg);
-      ids = members.map((i) => profile.cylinders[i].num);
+      return { fires, ids };
     }
-    return waveSpectrum(bankWaveform(fires, pulseWidth, roughness, ids), harmonics);
+    return { fires: members.map((i) => profile.cylinders[i].fireDeg), ids: members.map((i) => profile.cylinders[i].num) };
   });
+}
+
+/** Per-bank spectra for an engine profile. */
+export function exhaustSpectra(profile, harmonics = 256, shape = {}) {
+  const { pulseWidth, roughness } = profile.exhaust;
+  return bankFirings(profile).map(({ fires, ids }) => waveSpectrum(bankWaveform(fires, pulseWidth, roughness, ids, shape), harmonics));
 }
