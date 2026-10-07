@@ -67,7 +67,10 @@ function storageFor(key) {
 
 // Theme tokens for canvas drawing (one deliberate theme, so read once).
 const tokens = {};
-const token = (name) => (tokens[name] ??= getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888');
+const token = (name) => {
+  if (!(name in tokens)) tokens[name] = getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888';
+  return tokens[name];
+};
 
 function niceStep(range, targetTicks) {
   const raw = range / Math.max(1, targetTicks);
@@ -91,19 +94,28 @@ class Plot {
     this.y0 = 0;
     this.y1 = 1;
     this.logY = false;
-    if (typeof ResizeObserver !== 'undefined') {
+    this.observed = typeof ResizeObserver !== 'undefined';
+    if (this.observed) {
       new ResizeObserver(() => {
         this.sizeDirty = true;
       }).observe(canvas);
     }
   }
 
-  /** Match the backing store to the element size. Returns false while hidden. */
+  /**
+   * Match the backing store to the element size. Returns false while hidden.
+   * Measures only after the ResizeObserver reports a change, so a hidden or
+   * squeezed canvas costs no layout read per frame.
+   */
   fit() {
-    if (!this.sizeDirty && this.w) return true;
+    if (!this.sizeDirty) return this.w > 0;
     const w = this.canvas.clientWidth;
     const h = this.canvas.clientHeight;
-    if (!w || !h) return false;
+    if (this.observed) this.sizeDirty = false;
+    if (!w || !h) {
+      this.w = 0;
+      return false;
+    }
     this.sizeDirty = false;
     const dpr = Math.min(3, window.devicePixelRatio || 1);
     const bw = Math.round(w * dpr);
@@ -443,14 +455,18 @@ export default {
     const race = new DragRace();
     let msgKey = ''; // what the drag card's status line currently says
     const dragRecords = new DragRecords(storageFor(KEYS.drag));
+    // Records and dyno runs are per engine: layout, displacement and induction
+    // (a 5.0 and a 6.2 V8 of the same layout are different engines).
+    const litres = () => (Number.isFinite(app.profile.displacementL) ? app.profile.displacementL.toFixed(1) : '');
     const engineKey = () => {
       const kind = app.profile.induction?.kind ?? 'na';
-      return kind === 'na' ? app.profile.id : `${app.profile.id}+${kind}`;
+      const base = litres() ? `${app.profile.id}@${litres()}` : app.profile.id;
+      return kind === 'na' ? base : `${base}+${kind}`;
     };
     const engineLabel = () => {
       const kind = app.profile.induction?.kind ?? 'na';
       const ind = { turbo: 'turbo', 'twin-turbo': 'twin-turbo', supercharger: 'supercharged' }[kind];
-      return `${app.profile.name}${ind ? ` · ${ind}` : ''}`;
+      return `${app.profile.name}${litres() ? ` ${litres()} L` : ''}${ind ? ` · ${ind}` : ''}`;
     };
 
     // ── Dyno ───────────────────────────────────────────────────────────────
@@ -610,14 +626,42 @@ export default {
       node.style.maxHeight = `${Math.round(Math.max(minH, Math.min(h, area.b - spot.y)))}px`;
     }
 
+    // Landscape phones: the dyno sheet runs full height between the tach and
+    // lever on the left and the top-right buttons and rail on the right, so
+    // mute, telemetry and settings stay reachable (it may cover the pedals:
+    // the car is strapped down). Too narrow there: the CSS right-hand sheet.
+    const landscapeQuery = matchMedia('(max-height: 500px)'); // the CSS landscape breakpoint
+    const DYNO_MIN_W = 330;
+    const DYNO_MAX_W = 440;
+    function placeDyno() {
+      const node = dynoUi.root;
+      node.style.left = '';
+      node.style.right = '';
+      node.style.width = '';
+      if (!landscapeQuery.matches) return;
+      const origin = overlay.getBoundingClientRect();
+      const sa = safeArea.getBoundingClientRect();
+      let l = sa.left - origin.left;
+      let r = sa.right - origin.left;
+      for (const o of rectsOf([document.querySelector('.tach'), document.querySelector('.shifter-wrap')], origin)) l = Math.max(l, o.r);
+      const right = [document.querySelector('.hud-right'), ...(railEl ? railEl.children : [])];
+      for (const o of rectsOf(right, origin)) if (o.l > l) r = Math.min(r, o.l);
+      if (r - l < DYNO_MIN_W) return;
+      const w = Math.min(DYNO_MAX_W, r - l);
+      node.style.left = `${Math.round(r - w)}px`;
+      node.style.right = 'auto';
+      node.style.width = `${Math.round(w)}px`;
+    }
+
     let placeQueued = 0;
     function placeOverlays() {
       placeQueued = 0;
       if (!dragUi.root.hidden) placeCard(dragUi.root, 250, 420, 120);
       if (!slipUi.root.hidden) placeCard(slipUi.root, 200, 300, 190);
+      if (!dynoUi.root.hidden) placeDyno();
     }
     const queuePlacement = () => {
-      if (!placeQueued && (!dragUi.root.hidden || !slipUi.root.hidden)) placeQueued = requestAnimationFrame(placeOverlays);
+      if (!placeQueued && (!dragUi.root.hidden || !slipUi.root.hidden || !dynoUi.root.hidden)) placeQueued = requestAnimationFrame(placeOverlays);
     };
     // The rail and the HUD cards change size when other features show or hide things.
     if (typeof ResizeObserver !== 'undefined') {
@@ -932,6 +976,7 @@ export default {
       dynoBtn.setAttribute('aria-pressed', 'true');
       dynoUi.root.hidden = false;
       scrim.hidden = false;
+      placeDyno();
     }
 
     function mountRollers() {
@@ -1520,7 +1565,7 @@ export default {
       afterStep(dt) {
         if (dyno.open) dynoAfterStep(dt);
         if (race.active) {
-          race.update(dt, sim.distance, Math.abs(sim.v), sim.running);
+          race.step(dt, sim.v, sim.running); // forward travel only: reversing never runs the strip
           for (const e of race.drainEvents()) onDragEvent(e);
         }
         // Finished shift records, oldest first.

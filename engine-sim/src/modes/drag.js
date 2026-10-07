@@ -39,6 +39,7 @@ export class DragRace {
   constructor() {
     this.events = [];
     this.result = null;
+    this.odometer = 0; // forward distance fed by step(), never decreasing
     this.reset();
     this.phase = 'idle';
   }
@@ -106,7 +107,17 @@ export class DragRace {
   }
 
   /**
-   * Advance by dt seconds. odometer: total distance the car has covered (m,
+   * Advance by dt seconds from the car's signed road speed v (m/s, forward
+   * positive). Only forward travel moves the car down the strip: rolling or
+   * reversing backwards never counts towards the rollout or the marks.
+   */
+  step(dt, v, running) {
+    if (v > 0) this.odometer += v * dt;
+    this.update(dt, this.odometer, Math.abs(v), running);
+  }
+
+  /**
+   * Advance by dt seconds. odometer: forward distance the car has covered (m,
    * never decreasing); speed: |v| in m/s; running: engine running.
    */
   update(dt, odometer, speed, running) {

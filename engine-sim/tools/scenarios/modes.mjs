@@ -117,6 +117,18 @@ export default async function modes({ page, evaluate, advance, shot, expect, log
   });
   expect(mounted.open && mounted.onRollers && mounted.dragArea === 0, 'car strapped to the rollers (no aero)');
   expect(mounted.mode === 'manual', 'dyno works the gearbox itself');
+  // The sheet may cover the lever and pedals (the car is strapped down), never the tach or the top-right buttons.
+  const dynoBox = await covers('.mo-dyno');
+  const measured = await evaluate(() => document.querySelector('.mo-dyno').style.width !== '');
+  const landscape = await evaluate(() => window.matchMedia('(max-height: 500px)').matches);
+  log(`dyno sheet at ${dynoBox.box}${dynoBox.rail.length ? ` (over ${dynoBox.rail.join(' ')})` : ''}${landscape && !measured ? ' (no room between the HUD columns: right-hand sheet)' : ''}`);
+  const dynoHard = dynoBox.hard.filter((h) => h !== '.shifter-wrap' && h !== '.pedal-wrap');
+  if (landscape && !measured && dynoHard.every((h) => h === '.hud-right')) {
+    if (dynoHard.length) log('WARNING: the centre column is too narrow for the dyno sheet here, so it covers the top-right buttons');
+  } else {
+    expect(dynoHard.length === 0, `dyno sheet clear of the tach and the top-right buttons${dynoHard.length ? ` (covers ${dynoHard.join(', ')})` : ''}`);
+  }
+  if (landscape && measured) expect(dynoBox.rail.length === 0, `dyno sheet clear of the tool rail${dynoBox.rail.length ? ` (covers ${dynoBox.rail.join(', ')})` : ''}`);
   await shot('modes-dyno-ready');
   await tap('.mo-dyno .primary-btn');
   expect((await events('dyno:start')).length === 1, 'dyno:start emitted');

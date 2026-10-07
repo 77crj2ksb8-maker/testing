@@ -112,6 +112,27 @@ test('drag: a car that stops mid-run is aborted', () => {
   assert.equal(race.result, null);
 });
 
+test('drag: only forward travel runs the strip (reversing never starts or finishes a run)', () => {
+  const race = new DragRace();
+  race.arm();
+  for (let i = 0; i < 400 && race.phase !== 'green'; i++) race.step(DT, 0, true);
+  assert.equal(race.phase, 'green');
+  // Back away from the line: way past the rollout and the whole quarter, but backwards.
+  for (let i = 0; i < 120 * 40; i++) race.step(DT, -12, true);
+  assert.equal(race.phase, 'green', 'reversing does not trip the stage beam');
+  assert.equal(race.drainEvents().filter((e) => e.type === 'start' || e.type === 'finish').length, 0);
+  // Drive forwards: the run starts from where the car is now and finishes 1/4 mile later.
+  let forward = 0;
+  for (let i = 0; i < 120 * 60 && race.phase !== 'done'; i++) {
+    race.step(DT, 30, true);
+    forward += 30 * DT;
+  }
+  assert.equal(race.phase, 'done');
+  assert.ok(race.result && !race.result.foul, 'a timed run');
+  assert.ok(Math.abs(forward - (ROLLOUT_M + QUARTER_M)) < 30 * DT * 2, `finished after rollout + 1/4 mile of forward travel (${forward.toFixed(1)} m)`);
+  assert.ok(Math.abs(race.result.et - QUARTER_M / 30) < 0.01, `ET at a constant 30 m/s (${race.result.et.toFixed(3)} s)`);
+});
+
 test('drag: personal bests per engine, persisted, fouls excluded', () => {
   const store = { data: null, load() { return this.data; }, save(d) { this.data = JSON.parse(JSON.stringify(d)); } };
   const recs = new DragRecords(store);

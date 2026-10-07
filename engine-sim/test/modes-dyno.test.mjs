@@ -4,7 +4,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildProfile, DEFAULT_SETTINGS, DRIVETRAIN_DEFAULTS, peakFigures, wotTorque } from '../src/config.js';
+import { buildProfile, DEFAULT_SETTINGS, DRIVETRAIN_DEFAULTS, peakFigures, wotTorque, powerHp } from '../src/config.js';
 import { Drivetrain, RPM_TO_RAD } from '../src/physics.js';
 import { garagePatch } from '../src/presets.js';
 import {
@@ -98,7 +98,12 @@ test('dyno: measured torque tracks the simulator across a naturally aspirated pu
     simPeak = Math.max(simPeak, net);
   }
   assert.ok(Math.abs(result.peakNm - simPeak) / simPeak < 0.05, `peak ${result.peakNm.toFixed(0)} vs ${simPeak.toFixed(0)} Nm`);
-  assert.ok(Math.abs(result.peakHp - (result.peakNm * result.peakNmRpm) / 7023.5) >= 0, 'hp computed');
+  // Power uses the same horsepower as the rest of the app, and the peak is the curve's maximum.
+  for (const p of result.points) assert.ok(Math.abs(p.hp - powerHp(p.nm, p.rpm)) < 1e-9, `hp at ${p.rpm}`);
+  const best = result.points.reduce((a, p) => (p.hp > a.hp ? p : a));
+  assert.equal(result.peakHp, best.hp);
+  assert.equal(result.peakHpRpm, best.rpm);
+  assert.ok(result.peakHpRpm > result.peakNmRpm, 'peak power comes above peak torque');
 });
 
 test('dyno: live curve grows during the pull without exceeding its buffers', () => {
